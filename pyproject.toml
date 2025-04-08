@@ -1,10 +1,10 @@
-
 [project]
-name = "rail_shire"
+name = "pz-rail-dspsxfors2"
+requires-python = ">=3.9"
 license = {file = "LICENSE"}
 readme = "README.md"
 authors = [
-    { name = "Joseph Chevalier", email = "name@you.com" }
+    { name = "LSST Dark Energy Science Collaboration (DESC)", email = "lsst-desc-rail-admin@slac.stanford.edu" }
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -15,21 +15,30 @@ classifiers = [
     "Programming Language :: Python",
 ]
 dynamic = ["version"]
-requires-python = ">=3.10"
-dependencies = [
-]
 
-[project.urls]
-"Source Code" = "https://github.com/LSSTDESC/rail_shire"
+dependencies = [
+    "numpy",
+    "astropy",
+    "h5py",
+    "tqdm",
+    "diffstar",
+    "diffmah",
+    "dsps",
+    "jax",
+    "jaxlib",
+    "interpax",
+    "jax_cosmo",
+    "pandas",
+    "pz-rail-dsps"
+]
 
 # On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
 [project.optional-dependencies]
 dev = [
-    "jupyter", # Clears output from Jupyter notebooks
-    "pre-commit", # Used to run checks before finalizing a git commit
-    "pylint", # Used for static linting of files
     "pytest",
     "pytest-cov", # Used to report total code coverage
+    "pre-commit", # Used to run checks before finalizing a git commit
+    "pylint", # Used for static linting of files
 ]
 
 [build-system]
@@ -40,66 +49,42 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
-write_to = "src/rail_shire/_version.py"
+write_to = "src/rail/dsps_fors2_pz/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = [
     "tests",
 ]
-
-[tool.black]
-line-length = 110
-target-version = ["py310"]
-
-[tool.isort]
-profile = "black"
-line_length = 110
-
-[tool.ruff]
-line-length = 110
-target-version = "py310"
-
-[tool.ruff.lint]
-select = [
-    # pycodestyle
-    "E",
-    "W",
-    # Pyflakes
-    "F",
-    # pep8-naming
-    "N",
-    # pyupgrade
-    "UP",
-    # flake8-bugbear
-    "B",
-    # flake8-simplify
-    "SIM",
-    # isort
-    "I",
-    # docstrings
-    "D101",
-    "D102",
-    "D103",
-    "D106",
-    "D206",
-    "D207",
-    "D208",
-    "D300",
-    "D417",
-    "D419",
-    # Numpy v2.0 compatibility
-    "NPY201",
+addopts = [
+    "--cov=rail",
+    "--cov-report=html"
 ]
 
-ignore = [
-    "UP006", # Allow non standard library generics in type hints
-    "UP007", # Allow Union in type hints
-    "SIM114", # Allow if with same arms
-    "B028", # Allow default warning level
-    "SIM117", # Allow nested with
-    "UP015", # Allow redundant open parameters
-    "UP028", # Allow yield in for loop
+[tool.pylint]
+disable = [
+    "abstract-method",
+    "invalid-name",
+    "too-many-statements",
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "too-few-public-methods",
+    "duplicate-code",
+    "use-dict-literal",
+    "broad-exception-caught",
+    "too-many-positional-arguments",
+    "too-many-arguments",
+    "wrong-import-order",
+    "unused-variable",
+    "pointless-string-statement",
+    "ungrouped-imports",
+    "import-outside-toplevel",
+    "unreachable",
+    "unspecified-encoding",
+    "no-member",
+    "not-callable"
 ]
-
-[tool.coverage.run]
-omit=["src/rail_shire/_version.py"]
+max-line-length = 200
+max-locals = 50
+max-branches = 25
+max-public-methods = 50
