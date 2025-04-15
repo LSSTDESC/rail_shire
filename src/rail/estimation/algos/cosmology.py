@@ -1,5 +1,6 @@
 #!/bin/env python3
 
+import os
 from collections import namedtuple
 from functools import partial
 
@@ -35,6 +36,8 @@ f_ga = 1
 
 Cosmo = namedtuple("Cosmo", ["h0", "om0", "l0", "omt"])
 PriorParams = namedtuple("PriorParams", ["mod", "zot", "kt", "alpt0", "pcal", "ktf", "ft", "nuv_range"])
+
+DATALOC = os.path.join(os.environ["FORS2DATALOC"], "photoz")
 
 # P(T|m0)
 ktf = jnp.array([0.47165, 0.30663, 0.12715, -0.34437])

@@ -35,8 +35,8 @@ UV_BUMP_AMPL = 2.0
 PLAW_SLOPE = -0.25
 DEFAULT_DUST_PARAMS = [AV, UV_BUMP_AMPL, PLAW_SLOPE]
 DUST_PARAMNAMES = ["AV", "UV_BUMP", "PLAW_SLOPE"]
-DEFAULT_DUST_PARAMS_MIN = DEFAULT_DUST_PARAMS + np.array([-1.0, -1.0, -0.1])
-DEFAULT_DUST_PARAMS_MAX = DEFAULT_DUST_PARAMS + np.array([2.0, 1.0, 0.25])
+DEFAULT_DUST_PARAMS_MIN = DEFAULT_DUST_PARAMS + np.array([-1.0, -2.0, -0.3])  # former min -0.1 for PLAW_SLOPE
+DEFAULT_DUST_PARAMS_MAX = DEFAULT_DUST_PARAMS + np.array([3.0, 2.0, 0.25])
 
 
 # Metalicity parameters
@@ -45,15 +45,15 @@ LGMETSCATTER = 0.2
 DEFAULT_LGMET_PARAMS = np.array([LGMET, LGMETSCATTER])
 LGMET_PARAMNAMES = ["LGMET", "LGMETSCATTER"]
 DEFAULT_LGMET_PARAMS_MIN = np.array([-4.34, 0.1])
-DEFAULT_LGMET_PARAMS_MAX = np.array([-3.5, 0.3])
+DEFAULT_LGMET_PARAMS_MAX = np.array([2.0, 0.3])
 
 # Age-dependant metallicity parameters
-LGMET_YOUNG = 1.0
-LGMET_OLD = -2.0
+LGMET_YOUNG = 0.0
+LGMET_OLD = -3.0
 DEFAULT_AGEDEPLGMET_PARAMS = np.array([LGMET_YOUNG, LGMET_OLD])
 AGEDEPLGMET_PARAMNAMES = ["LGMET_YOUNG", "LGMET_OLD"]
-DEFAULT_AGEDEPLGMET_PARAMS_MIN = np.array([-2.0, -4.34])
-DEFAULT_AGEDEPLGMET_PARAMS_MAX = np.array([3.0, 0.0])
+DEFAULT_AGEDEPLGMET_PARAMS_MIN = np.array([-3.0, -4.34])
+DEFAULT_AGEDEPLGMET_PARAMS_MAX = np.array([2.5, 0.0])
 
 # Scaling free-parameter
 SCALE = 1.0
@@ -121,37 +121,40 @@ DICT_PARAMS_true.update(DICT_PARAM_SCALE_true)
 # increase range of parameters
 # check in article
 
-FLAG_INCREASE_RANGE_MAH = False
+FLAG_INCREASE_RANGE_MAH = True
 if FLAG_INCREASE_RANGE_MAH:
+    # MAH_lgmO
+    DEFAULT_MAH_PARAMS_MIN[0] = 6  # defaults min is 9
+    DEFAULT_MAH_PARAMS_MAX[0] = 17  # defaults max is 14
     # MAH_logtc
     DEFAULT_MAH_PARAMS_MIN[1] = 0.01
-    DEFAULT_MAH_PARAMS_MAX[1] = 0.15
+    DEFAULT_MAH_PARAMS_MAX[1] = 1.0  # 0.15
     # MAH_early_index
-    DEFAULT_MAH_PARAMS_MIN[2] = 0.1
-    DEFAULT_MAH_PARAMS_MAX[2] = 10.0  # 0.10 -- erreur de frappe? ça bloquait cette valeur à 0.1
+    DEFAULT_MAH_PARAMS_MIN[2] = 0.05  # 0.1
+    DEFAULT_MAH_PARAMS_MAX[2] = 20.0  # 0.10 -- erreur de frappe? ça bloquait cette valeur à 0.1
     # MAH_late_index
-    DEFAULT_MAH_PARAMS_MIN[3] = 0.1
-    DEFAULT_MAH_PARAMS_MAX[3] = 10.0
+    DEFAULT_MAH_PARAMS_MIN[3] = 0.001  # 0.1
+    DEFAULT_MAH_PARAMS_MAX[3] = 20.0
 
-FLAG_INCREASE_RANGE_MS = False
+FLAG_INCREASE_RANGE_MS = True
 if FLAG_INCREASE_RANGE_MS:
     # MS_lgmcrit  12
-    DEFAULT_MS_PARAMS_MIN[0] = 6.0  # 9.0
-    DEFAULT_MS_PARAMS_MAX[0] = 15.0  # 13.0
+    DEFAULT_MS_PARAMS_MIN[0] = 5.0  # 9.0
+    DEFAULT_MS_PARAMS_MAX[0] = 20.0  # 13.0
     # MS_lgy_at_mcrit : -1
     DEFAULT_MS_PARAMS_MIN[1] = -2.0
-    DEFAULT_MS_PARAMS_MAX[1] = -0.7
+    DEFAULT_MS_PARAMS_MAX[1] = -0.01  # -0.7
     # MS_indx_lo : 1
-    DEFAULT_MS_PARAMS_MIN[2] = 0.7
-    DEFAULT_MS_PARAMS_MAX[2] = 2.0
+    DEFAULT_MS_PARAMS_MIN[2] = 0.5
+    DEFAULT_MS_PARAMS_MAX[2] = 5.0  # 2.0
     # MS_indx_hi : -1
-    DEFAULT_MS_PARAMS_MIN[3] = -2.0
-    DEFAULT_MS_PARAMS_MAX[3] = -0.7
+    DEFAULT_MS_PARAMS_MIN[3] = -5.0  # -2.0
+    DEFAULT_MS_PARAMS_MAX[3] = -0.5
     # MS_tau_dep : 2
-    DEFAULT_MS_PARAMS_MIN[4] = 0.7
-    DEFAULT_MS_PARAMS_MAX[4] = 3.0
+    DEFAULT_MS_PARAMS_MIN[4] = 0.1
+    DEFAULT_MS_PARAMS_MAX[4] = 5.0
 
-FLAG_INCREASE_RANGE_Q = False
+FLAG_INCREASE_RANGE_Q = True
 if FLAG_INCREASE_RANGE_Q:
     #'Q_lg_qt', 1.0)
     DEFAULT_Q_PARAMS_MIN[0] = 0.5
@@ -163,7 +166,7 @@ if FLAG_INCREASE_RANGE_Q:
     DEFAULT_Q_PARAMS_MIN[2] = -2.0
     DEFAULT_Q_PARAMS_MAX[2] = -0.5
     # ('Q_lg_rejuv', -0.212307),
-    DEFAULT_Q_PARAMS_MIN[3] = -2.0
+    DEFAULT_Q_PARAMS_MIN[3] = -0.5  # -2.0
     DEFAULT_Q_PARAMS_MAX[3] = -0.1
 
 PARAMS_MIN = np.concatenate(
@@ -229,14 +232,14 @@ class SSPParametersFit:
         self.DEFAULT_DUST_PARAMS_MIN = DEFAULT_DUST_PARAMS_MIN
         self.DEFAULT_DUST_PARAMS_MAX = DEFAULT_DUST_PARAMS_MAX
 
-        """
-        # Age-dependant metallicity parameters - We only keep the young metallicity
+        # Age-dependant metallicity parameters - If it does not work with a fitted OLD metallicity, we will revert back to only keeping the young metallicity
         self.LGMET_YOUNG = LGMET_YOUNG
-        self.DEFAULT_AGEDEPLGMET_PARAMS = np.array([self.LGMET_YOUNG])
-        self.AGEDEPLGMET_PARAMNAMES = [AGEDEPLGMET_PARAMNAMES[0]]
-        self.DEFAULT_AGEDEPLGMET_PARAMS_MIN = [DEFAULT_AGEDEPLGMET_PARAMS_MIN[0]]
-        self.DEFAULT_AGEDEPLGMET_PARAMS_MAX = [DEFAULT_AGEDEPLGMET_PARAMS_MAX[0]]
-        """
+        self.LGMET_OLD = LGMET_OLD
+        self.DEFAULT_AGEDEPLGMET_PARAMS = DEFAULT_AGEDEPLGMET_PARAMS  # np.array([self.LGMET_YOUNG])
+        self.AGEDEPLGMET_PARAMNAMES = AGEDEPLGMET_PARAMNAMES  # [AGEDEPLGMET_PARAMNAMES[0]]
+        self.DEFAULT_AGEDEPLGMET_PARAMS_MIN = DEFAULT_AGEDEPLGMET_PARAMS_MIN  # [DEFAULT_AGEDEPLGMET_PARAMS_MIN[0]]
+        self.DEFAULT_AGEDEPLGMET_PARAMS_MAX = DEFAULT_AGEDEPLGMET_PARAMS_MAX  # [DEFAULT_AGEDEPLGMET_PARAMS_MAX[0]]
+
         # Scaling free parameter
         # self.DEFAULT_SCALE_PARAMS = DEFAULT_SCALE_PARAMS
         # self.SCALE_PARAMNAMES = SCALE_PARAMNAMES
@@ -244,13 +247,19 @@ class SSPParametersFit:
         # self.DEFAULT_SCALE_PARAMS_MAX = DEFAULT_SCALE_PARAMS_MAX
 
         # bound parameters together
-        self.DEFAULT_PARAMS = [self.DEFAULT_MAH_PARAMS, self.DEFAULT_MS_PARAMS, self.DEFAULT_Q_PARAMS, self.DEFAULT_DUST_PARAMS]  # , self.DEFAULT_SCALE_PARAMS en avant-dernier
+        self.DEFAULT_PARAMS = [
+            self.DEFAULT_MAH_PARAMS,
+            self.DEFAULT_MS_PARAMS,
+            self.DEFAULT_Q_PARAMS,
+            self.DEFAULT_DUST_PARAMS,
+            self.DEFAULT_AGEDEPLGMET_PARAMS,
+        ]  # , self.DEFAULT_SCALE_PARAMS en avant-dernier
 
         self.PARAMS_MIN = np.concatenate(
-            [self.DEFAULT_MAH_PARAMS_MIN, self.DEFAULT_MS_PARAMS_MIN, self.DEFAULT_Q_PARAMS_MIN, self.DEFAULT_DUST_PARAMS_MIN]
+            [self.DEFAULT_MAH_PARAMS_MIN, self.DEFAULT_MS_PARAMS_MIN, self.DEFAULT_Q_PARAMS_MIN, self.DEFAULT_DUST_PARAMS_MIN, self.DEFAULT_AGEDEPLGMET_PARAMS_MIN]
         )  # , self.DEFAULT_SCALE_PARAMS_MIN en avant-dernier
         self.PARAMS_MAX = np.concatenate(
-            [self.DEFAULT_MAH_PARAMS_MAX, self.DEFAULT_MS_PARAMS_MAX, self.DEFAULT_Q_PARAMS_MAX, self.DEFAULT_DUST_PARAMS_MAX]
+            [self.DEFAULT_MAH_PARAMS_MAX, self.DEFAULT_MS_PARAMS_MAX, self.DEFAULT_Q_PARAMS_MAX, self.DEFAULT_DUST_PARAMS_MAX, self.DEFAULT_AGEDEPLGMET_PARAMS_MAX]
         )  # , self.DEFAULT_SCALE_PARAMS_MAX en avant-dernier
 
         self.PARAMS_MIN = jnp.array(self.PARAMS_MIN)
@@ -259,7 +268,7 @@ class SSPParametersFit:
         self.INIT_PARAMS = np.concatenate(self.DEFAULT_PARAMS)
         self.INIT_PARAMS = jnp.array(self.INIT_PARAMS)
 
-        self.PARAM_NAMES = [self.MAH_PARAMNAMES, self.MS_PARAMNAMES, self.Q_PARAMNAMES, self.DUST_PARAMNAMES]  # , self.SCALE_PARAMNAMES en avant-dernier
+        self.PARAM_NAMES = [self.MAH_PARAMNAMES, self.MS_PARAMNAMES, self.Q_PARAMNAMES, self.DUST_PARAMNAMES, self.AGEDEPLGMET_PARAMNAMES]  # , self.SCALE_PARAMNAMES en avant-dernier
         self.PARAM_NAMES_FLAT = list(itertools.chain(*self.PARAM_NAMES))
 
         self.DICT_PARAM_MAH_true = OrderedDict([(name, self.DEFAULT_MAH_PARAMS[k]) for k, name in enumerate(self.MAH_PARAMNAMES)])
@@ -271,12 +280,14 @@ class SSPParametersFit:
         # self.DICT_PARAM_SCALE_true = OrderedDict([(name, self.DEFAULT_SCALE_PARAMS[k]) for k, name in enumerate(self.SCALE_PARAMNAMES)])
 
         self.DICT_PARAM_DUST_true = OrderedDict([(name, self.DEFAULT_DUST_PARAMS[k]) for k, name in enumerate(self.DUST_PARAMNAMES)])
+        self.DICT_AGEDEPLGMET_DUST_true = OrderedDict([(name, self.DEFAULT_AGEDEPLGMET_PARAMS[k]) for k, name in enumerate(self.DEFAULT_AGEDEPLGMET_PARAMS)])
 
         self.DICT_PARAMS_true = self.DICT_PARAM_MAH_true
         self.DICT_PARAMS_true.update(self.DICT_PARAM_MS_true)
         self.DICT_PARAMS_true.update(self.DICT_PARAM_Q_true)
         # self.DICT_PARAMS_true.update(self.DICT_PARAM_SCALE_true)
         self.DICT_PARAMS_true.update(self.DICT_PARAM_DUST_true)
+        self.DICT_PARAMS_true.update(self.DICT_AGEDEPLGMET_DUST_true)
 
     def __repr__(self) -> str:
         all_str = []
