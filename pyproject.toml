@@ -50,7 +50,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
-write_to = "src/rail_shire/_version.py"
+write_to = "src/rail/shire/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = [
