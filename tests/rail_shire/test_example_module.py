@@ -1,5 +1,5 @@
-from rail import dsps_fors2_pz
-from rail.dsps_fors2_pz import example_module
+from rail import shire
+from rail.shire import example_module
 
 
 def test_greetings() -> None:
@@ -16,5 +16,5 @@ def test_meaning() -> None:
 
 def test_json_to_inputs() -> None:
     """Verify the output of the `json_to_inputs` function"""
-    output = dsps_fors2_pz.json_to_inputs('src/rail/dsps_fors2_pz/data/defaults.json')
+    output = shire.json_to_inputs('examples/defaults.json')
     assert isinstance(output, dict)
