@@ -16,5 +16,5 @@ def test_meaning() -> None:
 
 def test_json_to_inputs() -> None:
     """Verify the output of the `json_to_inputs` function"""
-    output = shire.json_to_inputs('examples/defaults.json')
+    output = shire.json_to_inputs('examples/conf_shire_COSMOS2020.json')
     assert isinstance(output, dict)

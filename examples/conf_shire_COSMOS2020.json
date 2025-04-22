@@ -1,0 +1,58 @@
+{
+    "photoZ": {
+        "Z_GRID": {
+            "z_min": 0.01,
+            "z_max": 3.10,
+            "z_step": 0.01
+        },
+        "WL_GRID": {
+            "lambda_min": 100.0,
+            "lambda_max": 15000.0,
+            "lambda_step": 10.0
+        },
+        "Templates": {
+            "input": "templ_NEWscoredOnTraining_SPS.h5",
+            "output": "SEDtempl_NEWscoredOnTraining_SPS.h5",
+            "overwrite": true
+        },
+        "Mode": "SPS",
+        "Filters": {
+            "0": {
+                "name": "cfht_megacam_us_9301",
+                "path": ""
+            },
+            "1": {
+                "name": "hsc_g",
+                "path": ""
+            },
+            "2": {
+                "name": "hsc_r",
+                "path": ""
+            },
+            "3": {
+                "name": "hsc_i",
+                "path": ""
+            },
+            "4": {
+                "name": "hsc_z",
+                "path": ""
+            },
+            "5": {
+                "name": "hsc_y",
+                "path": ""
+            }
+        },
+        "i_band_num": 3,
+        "Dataset": {
+            "path": "data/COSMOS2020_emu_CC.inp",
+            "type": "F",
+            "is_ascii": true,
+            "overwrite": true
+        },
+        "prior": false,
+        "use_colors": true,
+        "i_colors": false,
+        "save results": true,
+        "run name": "PZ_COSMOS2020_SPS_noprior"
+    }
+}

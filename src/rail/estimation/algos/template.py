@@ -8,7 +8,7 @@ Created on Thu Aug 1 12:59:33 2024
 @author: joseph
 """
 import os
-from collections import namedtuple
+#from collections import namedtuple
 from functools import partial
 
 import jax
@@ -686,6 +686,14 @@ def calc_nuvk(wls, params_dict, zobs, ssp_data):
 
 v_nuvk = vmap(calc_nuvk, in_axes=(None, None, 0, None))
 
+
+def get_colors_templates(params, wls, z_obs, transm_arr, ssp_data):
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, transm_arr, z_obs)
+    return _mags[:-1]-_mags[1:]
+
+vmap_cols_zo = vmap(get_colors_templates, in_axes=(None, None, 0, None, None))
+vmap_cols_templ = vmap(vmap_cols_zo, in_axes=(0, None, None, None, None))
 
 def make_sps_templates(params_arr, wls, transm_arr, redz_arr, av_arr, ssp_data):
     """make_sps_templates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.

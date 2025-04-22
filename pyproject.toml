@@ -83,9 +83,11 @@ disable = [
     "unreachable",
     "unspecified-encoding",
     "no-member",
-    "not-callable"
+    "not-callable",
+    "trailing-whitespace",
+    "too-many-instance-attributes"
 ]
 max-line-length = 200
-max-locals = 50
+max-locals = 100
 max-branches = 25
 max-public-methods = 50
