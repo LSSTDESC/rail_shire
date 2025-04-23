@@ -6,7 +6,6 @@ from jax.tree_util import tree_map
 #from jax import random as jrn
 import pandas as pd
 #import qp
-from sedpy import observate
 from tqdm import tqdm
 import tables_io
 from ceci.config import StageParameter as Param
@@ -16,6 +15,7 @@ from rail.core.common_params import SHARED_PARAMS
 from .io_utils import load_ssp, istuple
 from .analysis import _DUMMY_PARS #, PARS_DF, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
 from .template import vmap_cols_zo
+from .filter import get_sedpy
 from interpax import interp1d
 
 def nzfunc(z, z0, alpha, km, m, m0):  # pragma: no cover
@@ -153,23 +153,7 @@ class ShireInformer(CatInformer):
         )
         pars_arr = jnp.array(templs_ref_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
 
-        filts_tup = []
-        val_sedpy = observate.list_available_filters()
-        for _if, (fnam, fdir) in tqdm(enumerate(self.config.filter_dict.items()), total=len(self.config.filter_dict)):
-            if fdir == "" or fdir is None:
-                assert fnam in val_sedpy, f"Filter {_if} ({fnam}) is not available.\
-                    \nPlease provide path to an ASCII file with transmission table or use one of : {val_sedpy}."
-                _filt = observate.Filter(fnam)
-            else:
-                fdir = os.path.abspath(
-                    os.path.join(
-                        self.config["data_path"],
-                        "FILTER",
-                        fdir
-                    )
-                )
-                _filt = observate.Filter(fnam, directory=fdir)
-            filts_tup.append(_filt)
+        filts_tup = get_sedpy(self.config.filter_dict, self.config.data_path)
 
         wls = jnp.arange(
             self.config.wlmin,

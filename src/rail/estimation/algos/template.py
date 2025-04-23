@@ -7,13 +7,10 @@ Created on Thu Aug 1 12:59:33 2024
 
 @author: joseph
 """
-import os
-#from collections import namedtuple
+
 from functools import partial
 
 import jax
-import numpy as np
-import pandas as pd
 from jax import jit, vmap
 from jax.tree_util import tree_map
 from jax import numpy as jnp
@@ -22,7 +19,7 @@ from diffmah.defaults import DiffmahParams
 from diffstar import calc_sfh_singlegal  # sfh_singlegal
 from diffstar.defaults import DiffstarUParams  # , DEFAULT_Q_PARAMS
 from rail.dsps import calc_obs_mag, calc_rest_mag, DEFAULT_COSMOLOGY, age_at_z
-from dsps.cosmology import age_at_z0, luminosity_distance_to_z
+from dsps.cosmology import age_at_z0
 from dsps.dust.att_curves import _frac_transmission_from_k_lambda, sbl18_k_lambda
 from interpax import interp1d
 try:
@@ -32,265 +29,16 @@ except ImportError:
         from jax.scipy.integrate import trapezoid
     except ImportError:
         from jax.numpy import trapz as trapezoid
-from astropy import constants as const
-from astropy import units as u
 
 from .met_weights_age_dep import calc_rest_sed_sfh_table_lognormal_mdf_agedep
 from .io_utils import istuple
-from .analysis import _DUMMY_PARS
+from .analysis import C_KMS, lsunPerHz_to_flam_noU
+from .filter import NUV_filt, NIR_filt
 
 jax.config.update("jax_enable_x64", True)
 
 TODAY_GYR = age_at_z0(*DEFAULT_COSMOLOGY)  # 13.8
 T_ARR = jnp.linspace(0.1, TODAY_GYR, 100)
-
-C_KMS = (const.c).to("km/s").value  # km/s
-C_CMS = (const.c).to("cm/s").value  # cm/s
-C_AAS = (const.c).to("AA/s").value  # AA/s
-C_MS = const.c  # m/s
-LSUN = const.L_sun  # Watts
-parsec = const.pc  # m
-AB0_Lum = (3631.0 * u.Jy * (4 * np.pi * np.power(10 * parsec, 2))).to("W/Hz")
-
-U_LSUNperHz = u.def_unit("Lsun . Hz^{-1}", LSUN * u.Hz**-1)
-AB0 = AB0_Lum.to(U_LSUNperHz)  # 3631 Jansky placed at 10 pc in units of Lsun/Hz
-U_LSUNperm2perHz = u.def_unit("Lsun . m^{-2} . Hz^{-1}", U_LSUNperHz * u.m**-2)
-jy_to_lsun = (1 * u.Jy).to(U_LSUNperm2perHz)
-
-U_FNU = u.def_unit("erg . cm^{-2} . s^{-1} . Hz^{-1}", u.erg / (u.cm**2 * u.s * u.Hz))
-U_FL = u.def_unit("erg . cm^{-2} . s^{-1} . AA^{-1}", u.erg / (u.cm**2 * u.s * u.AA))
-
-MPC_TO_M = (1 * u.Mpc).to(u.m).value
-LSUN_TO_FNU = (1 * U_LSUNperHz / (u.m * u.m)).to(U_FNU).value
-
-
-def convert_flux_torestframe(wl, fl, redshift=0.0):
-    """
-    Shifts the flux values to restframe wavelengths and scales them accordingly.
-
-    Parameters
-    ----------
-    wl : array
-        Wavelengths (unit unimportant) in the observation frame.
-    fl : array
-        Flux density (unit unimportant).
-    redshift : int or float, optional
-        Redshift of the object. The default is 0.
-
-    Returns
-    -------
-    tuple(array, array)
-        The spectrum blueshifted to restframe wavelengths.
-    """
-    factor = 1.0 + redshift
-    return wl / factor, fl * factor
-
-
-def convert_flux_toobsframe(wl, fl, redshift=0.0):
-    """
-    Shifts the flux values to observed wavelengths and scales them accordingly.
-
-    Parameters
-    ----------
-    wl : array
-        Wavelengths (unit unimportant) in the restframe.
-    fl : array
-        Flux density (unit unimportant).
-    redshift : int or float, optional
-        Redshift of the object. The default is 0.
-
-    Returns
-    -------
-    tuple(array, array)
-        The spectrum redshifted to observed wavelengths.
-    """
-    factor = 1.0 + redshift
-    return wl * factor, fl / factor
-
-
-def convertFlambdaToFnu(wl, flambda):
-    """
-    Convert spectra density flambda to fnu.
-    parameters:
-
-    :param wl: wavelength array
-    :type wl: float in Angstrom
-
-    :param flambda: flux density in erg/s/cm2 /AA or W/cm2/AA
-    :type flambda: float
-
-    :return: fnu, flux density in erg/s/cm2/Hz or W/cm2/Hz
-    :rtype: float
-
-    Compute Fnu = wl**2/c Flambda
-    check the conversion units with astropy units and constants
-    """
-    fnu = (flambda * U_FL * (wl * u.AA) ** 2 / const.c).to(U_FNU).value  # / (1 * U_FNU)
-    return fnu
-
-
-def convertFnuToFlambda(wl, fnu):
-    """
-    Convert spectra density fnu to flambda.
-    parameters:
-
-    :param wl: wavelength array
-    :type wl: float in Angstrom
-
-    :param fnu: flux density in erg/s/cm2/Hz or W/cm2/Hz
-    :type fnu: float
-
-    :return: flambda, flux density in erg/s/cm2 /AA or W/cm2/AA
-    :rtype: float
-
-    Compute Flambda = Fnu / (wl**2/c)
-    check the conversion units with astropy units and constants
-    """
-    flambda = (fnu * U_FNU * const.c / ((wl * u.AA) ** 2)).to(U_FL).value  # / (1 * U_FL)
-    return flambda
-
-
-def convertFlambdaToFnu_noU(wl, flambda):
-    """
-    Convert spectra density flambda to fnu.
-    parameters:
-
-    :param wl: wavelength array
-    :type wl: float in Angstrom
-
-    :param flambda: flux density in erg/s/cm2 /AA or W/cm2/AA
-    :type flambda: float
-
-    :return: fnu, flux density in erg/s/cm2/Hz or W/cm2/Hz
-    :rtype: float
-
-    Compute Fnu = wl**2/c Flambda
-    check the conversion units with astropy units and constants
-    """
-    fnu = flambda * jnp.power(wl, 2) / C_AAS
-    return fnu
-
-
-def convertFnuToFlambda_noU(wl, fnu):
-    """
-    Convert spectra density fnu to flambda.
-    parameters:
-
-    :param wl: wavelength array
-    :type wl: float in Angstrom
-
-    :param fnu: flux density in erg/s/cm2/Hz or W/cm2/Hz
-    :type fnu: float
-
-    :return: flambda, flux density in erg/s/cm2 /AA or W/cm2/AA
-    :rtype: float
-
-    Compute Flambda = Fnu / (wl**2/c)
-    check the conversion units with astropy units and constants
-    """
-    flambda = fnu * C_AAS / jnp.power(wl, 2)
-    return flambda
-
-
-def lsunPerHz_to_fnu(fsun, zob):
-    """lsunPerHz_to_fnu _summary_
-
-    :param fsun: _description_
-    :type fsun: _type_
-    :param zob: _description_
-    :type zob: _type_
-    :return: _description_
-    :rtype: _type_
-    """
-    dl = luminosity_distance_to_z(zob, *DEFAULT_COSMOLOGY) * u.Mpc  # in meters
-    dist_fact = 4 * jnp.pi * (dl.to(u.m) ** 2)  # * (1 + zob)
-    fnu = (fsun * U_LSUNperHz / dist_fact).to(U_FNU).value  # .to(u.Jy).to(U_FNU).value
-    return fnu
-
-
-def lsunPerHz_to_fnu_noU(fsun, zob):
-    """lsunPerHz_to_fnu _summary_
-
-    :param fsun: _description_
-    :type fsun: _type_
-    :param zob: _description_
-    :type zob: _type_
-    :return: _description_
-    :rtype: _type_
-    """
-    dl = luminosity_distance_to_z(zob, *DEFAULT_COSMOLOGY)  # in Mpc
-    dist_fact = 4 * jnp.pi * jnp.power(dl * MPC_TO_M, 2)  # * (1 + zob)
-    fnu = fsun * LSUN_TO_FNU / dist_fact
-    return fnu
-
-
-def fnu_to_lsunPerHz(fnu, zob):
-    """fnu_to_lsunPerHz _summary_
-
-    :param wl: _description_
-    :type wl: _type_
-    :param fnu: _description_
-    :type fnu: _type_
-    :param zob: _description_
-    :type zob: _type_
-    :return: _description_
-    :rtype: _type_
-    """
-    dl = luminosity_distance_to_z(zob, *DEFAULT_COSMOLOGY) * u.Mpc  # in meters
-    dist_fact = 4 * np.pi * (dl.to(u.m) ** 2)  # * (1 + zob)
-    fsun = (fnu * U_FNU * dist_fact).to(U_LSUNperHz).value
-    return fsun
-
-
-def lsunPerHz_to_flam(wl, fsun, zob):
-    """lsunPerHz_to_flam _summary_
-
-    :param wl: _description_
-    :type wl: _type_
-    :param fsun: _description_
-    :type fsun: _type_
-    :param zob: _description_
-    :type zob: _type_
-    :return: _description_
-    :rtype: _type_
-    """
-    fnu = lsunPerHz_to_fnu(fsun, zob)
-    flam = convertFnuToFlambda(wl, fnu)
-    return flam
-
-
-def lsunPerHz_to_flam_noU(wl, fsun, zob):
-    """lsunPerHz_to_flam _summary_
-
-    :param wl: _description_
-    :type wl: _type_
-    :param fsun: _description_
-    :type fsun: _type_
-    :param zob: _description_
-    :type zob: _type_
-    :return: _description_
-    :rtype: _type_
-    """
-    fnu = lsunPerHz_to_fnu_noU(fsun, zob)
-    flam = convertFnuToFlambda_noU(wl, fnu)
-    return flam
-
-
-def flam_to_lsunPerHz(wl, flam, zob):
-    """flam_to_lsunPerHz _summary_
-
-    :param wl: _description_
-    :type wl: _type_
-    :param flam: _description_
-    :type flam: _type_
-    :param zob: _description_
-    :type zob: _type_
-    :return: _description_
-    :rtype: _type_
-    """
-    fnu = convertFlambdaToFnu(wl, flam)
-    fsun = fnu_to_lsunPerHz(fnu, zob)
-    return fsun
 
 
 @jit
@@ -552,24 +300,6 @@ def calc_eqw(sur_wls, sur_spec, lin):
 
 vmap_calc_eqw = vmap(calc_eqw, in_axes=(None, None, 0))
 
-def read_h5_table(templ_h5_file, group="fit_dsps", classif="Classification"):
-    """read_h5_table _summary_
-
-    :param templ_h5_file: _description_
-    :type templ_h5_file: _type_
-    :param group: _description_, defaults to 'fit_dsps'
-    :type group: str, optional
-    :param classif: Name of the field holding classif. info. 'Classification', 'CAT_NII', 'CAT_SII', 'CAT_OI' or 'CAT_OIII/OIIvsOI', defaults to 'Classification'
-    :type classif: str, optional
-    :return: _description_
-    :rtype: _type_
-    """
-    templ_df = pd.read_hdf(os.path.abspath(templ_h5_file), key=group)
-    templ_pars_arr = jnp.array(templ_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
-    zref_arr = jnp.array(templ_df["redshift"])
-    classif_series = templ_df[classif]  # Default value is 'Classification' but other criteria can be used : 'CAT_NII', 'CAT_SII', etc.
-    return templ_pars_arr, zref_arr, classif_series  # placeholder, finish the function later to return the proper array of parameters
-
 
 @jit
 def templ_mags(params, wls, filt_trans_arr, z_obs, av, ssp_data):
@@ -594,8 +324,8 @@ def templ_mags(params, wls, filt_trans_arr, z_obs, av, ssp_data):
     _pars = params.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
     ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(_pars, z_obs, ssp_data)
-    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr[:-2], z_obs)
-    _nuvk = vmap_calc_rest_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr[-2:])
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
+    _nuvk = calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission) - calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
 
     mags_predictions = jnp.concatenate((_mags, _nuvk))
 
@@ -676,7 +406,7 @@ def calc_nuvk(wls, params_dict, zobs, ssp_data):
     :return: NUV-NIR color index
     :rtype: float
     """
-    from .filter import NIR_filt, NUV_filt, ab_mag
+    from .filter import ab_mag
 
     rest_sed = mean_spectrum(wls, params_dict, zobs, ssp_data)
     nuv = ab_mag(NUV_filt.wavelengths, NUV_filt.transmission, wls, rest_sed)
@@ -777,8 +507,8 @@ def templ_mags_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data):
     _pars = params.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
     ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(_pars, z_ref, ssp_data)
-    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr[:-2], z_obs)
-    _nuvk = vmap_calc_rest_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr[-2:])
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
+    _nuvk = calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission) - calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
 
     mags_predictions = jnp.concatenate((_mags, _nuvk))
 

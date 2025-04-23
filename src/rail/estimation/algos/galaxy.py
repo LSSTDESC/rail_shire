@@ -1,45 +1,11 @@
 #!/bin/env python3
 
-from collections import namedtuple
 from functools import partial
 
 import jax.numpy as jnp
 from jax import jit, vmap
 
 from .cosmology import nz_prior_core, prior_alpt0, prior_ft, prior_kt, prior_ktf, prior_pcal, prior_zot
-
-Observation = namedtuple("Observation", ["num", "ref_i_AB", "AB_colors", "AB_colerrs", "valid_filters", "valid_colors", "z_spec"])
-
-
-def load_galaxy(photometry, ismag, id_i_band=3):
-    """load_galaxy Returns all necessary data to instanciate an `Observation` object.
-
-    :param photometry: fluxes or magnitudes and corresponding errors as read from an ASCII input file
-    :type photometry: list or array-like
-    :param ismag: whether photometry is provided as AB-magnitudes or fluxes
-    :type ismag: bool
-    :param id_i_band: index of i-band in the photometry. The default is 3 for LSST u, g, r, i, z, y.
-    :type id_i_band: int, optional
-    :return: Tuple containing the i-band AB magnitude, the array of color indices for the observations (in AB mag units), the corresponding errors
-    and the array of booleans indicating which filters were used for this observation.
-    :rtype: tuple
-    """
-    assert len(photometry) % 2 == 0, "Missing data in observations : check that magnitudes/fluxes and errors are available\n and listed as M (or F), error, M (or F), error, etc."
-    _phot = jnp.array([photometry[2 * i] for i in range(len(photometry) // 2)])
-    _phot_errs = jnp.array([photometry[2 * i + 1] for i in range(len(photometry) // 2)])
-
-    if ismag:
-        c_ab = _phot[:-1] - _phot[1:]
-        c_ab_err = jnp.power(jnp.power(_phot_errs[:-1], 2) + jnp.power(_phot_errs[1:], 2), 0.5)
-        i_ab = _phot.at[id_i_band].get()
-        filters_to_use = jnp.logical_and(_phot > -15.0, _phot < 50.0)
-    else:
-        c_ab = -2.5 * jnp.log10(_phot[:-1] / _phot[1:])
-        c_ab_err = 2.5 / jnp.log(10) * jnp.power(jnp.power(_phot_errs[:-1] / _phot[:-1], 2) + jnp.power(_phot_errs[1:] / _phot[1:], 2), 0.5)
-        i_ab = -2.5 * jnp.log10(_phot.at[id_i_band].get()) - 48.6
-        filters_to_use = jnp.logical_and(_phot > 0.0, _phot_errs > 0.0)
-    colors_to_use = jnp.array([b1 and b2 for (b1, b2) in zip(filters_to_use[:-1], filters_to_use[1:], strict=True)])
-    return i_ab, c_ab, c_ab_err, filters_to_use, colors_to_use
 
 
 def load_magnitudes(photometry, ismag):
@@ -338,15 +304,15 @@ def posterior_fluxRatio(sps_temp, obs_ab_colors, obs_ab_colerrs, obs_iab, z_grid
 
 ## Free A_nu (dust) and fit on SPS params instead of template colors
 @jit
-def val_neg_log_likelihood_pars_z_anu(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data):
-    r"""val_neg_log_likelihood_pars_z_anu Computes the negative log likelihood of the redshift with one template for all observations.
+def val_neg_log_likelihood_pars_z_av(templ_pars, z, av, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data):
+    r"""val_neg_log_likelihood_pars_z_av Computes the negative log likelihood of the redshift with one template for all observations.
     This is a reduced $\chi^2$ and does not use a prior probability distribution.
 
     :param templ_pars: SPS parameters of the galaxy template
     :type templ_pars: array of floats
     :param z: Redshift value
     :type z: float
-    :param anu: Dust law attenuation parameter
+    :param av: Dust law attenuation parameter
     :type z: float
     :param gal_cols: Color indices of the observed object
     :type gal_cols: array of floats
@@ -357,7 +323,7 @@ def val_neg_log_likelihood_pars_z_anu(templ_pars, z, anu, gal_cols, gel_colerrs,
     """
     from .template import mean_colors
 
-    pars = templ_pars.at[13].set(anu)
+    pars = templ_pars.at[13].set(av)
     templ_cols = mean_colors(pars, wls, filt_trans_arr, z, ssp_data)
 
     _chi = chi_term(gal_cols, templ_cols, gel_colerrs)
@@ -366,12 +332,12 @@ def val_neg_log_likelihood_pars_z_anu(templ_pars, z, anu, gal_cols, gel_colerrs,
     return jnp.sum(chi) / _count
 
 
-vmap_obs_nllik = vmap(val_neg_log_likelihood_pars_z_anu, in_axes=(None, None, None, 0, 0, None, None, None))
-vmap_anu_nllik = vmap(vmap_obs_nllik, in_axes=(None, None, 0, None, None, None, None, None))
+vmap_obs_nllik = vmap(val_neg_log_likelihood_pars_z_av, in_axes=(None, None, None, 0, 0, None, None, None))
+vmap_av_nllik = vmap(vmap_obs_nllik, in_axes=(None, None, 0, None, None, None, None, None))
 
 
 @partial(vmap, in_axes=(None, 0, None, None, None, None, None, None))
-def vmap_z_nllik(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data):
+def vmap_z_nllik(templ_pars, z, av, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data):
     r"""vmap_z_nllik Computes the negative log likelihood of the redshift with one template for all observations, vmapped on redshifts and dust absorptions.
     This is a reduced $\chi^2$ and does not use a prior probability distribution.
 
@@ -379,7 +345,7 @@ def vmap_z_nllik(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_trans_arr,
     :type templ_pars: array of floats
     :param z: Redshift value
     :type z: float
-    :param anu: Dust law attenuation parameter
+    :param av: Dust law attenuation parameter
     :type z: float
     :param gal_cols: Color indices of the observed object
     :type gal_cols: array of floats
@@ -388,7 +354,7 @@ def vmap_z_nllik(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_trans_arr,
     :return: Likelihood of the redshift zp, if represented by the given template.
     :rtype: float
     """
-    return jnp.nanmin(vmap_anu_nllik(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data), axis=0)
+    return jnp.nanmin(vmap_av_nllik(templ_pars, z, av, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data), axis=0)
 
 
 vmap_templ_nllik = vmap(vmap_z_nllik, in_axes=(0, None, None, None, None, None, None, None))
@@ -396,15 +362,15 @@ vmap_templ_nllik = vmap(vmap_z_nllik, in_axes=(0, None, None, None, None, None, 
 
 ## Free A_nu (dust) and fit on SPS params instead of template colors
 @jit
-def val_neg_log_likelihood_pars_z_anu_iclrs(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data, iband_num):
-    r"""val_neg_log_likelihood_pars_z_anu_iclrs Computes the negative log likelihood of the redshift with one template for all observations.
+def val_neg_log_likelihood_pars_z_av_iclrs(templ_pars, z, av, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data, iband_num):
+    r"""val_neg_log_likelihood_pars_z_av_iclrs Computes the negative log likelihood of the redshift with one template for all observations.
     This is a reduced $\chi^2$ and does not use a prior probability distribution.
 
     :param templ_pars: SPS parameters of the galaxy template
     :type templ_pars: array of floats
     :param z: Redshift value
     :type z: float
-    :param anu: Dust law attenuation parameter
+    :param av: Dust law attenuation parameter
     :type z: float
     :param gal_cols: Color indices of the observed object
     :type gal_cols: array of floats
@@ -415,7 +381,7 @@ def val_neg_log_likelihood_pars_z_anu_iclrs(templ_pars, z, anu, gal_cols, gel_co
     """
     from .template import mean_icolors
 
-    pars = templ_pars.at[13].set(anu)
+    pars = templ_pars.at[13].set(av)
     templ_cols = mean_icolors(pars, wls, filt_trans_arr, z, ssp_data, iband_num)
 
     _chi = chi_term(gal_cols, templ_cols, gel_colerrs)
@@ -424,12 +390,12 @@ def val_neg_log_likelihood_pars_z_anu_iclrs(templ_pars, z, anu, gal_cols, gel_co
     return jnp.sum(chi) / _count
 
 
-vmap_obs_nllik_iclrs = vmap(val_neg_log_likelihood_pars_z_anu_iclrs, in_axes=(None, None, None, 0, 0, None, None, None, None))
-vmap_anu_nllik_iclrs = vmap(vmap_obs_nllik_iclrs, in_axes=(None, None, 0, None, None, None, None, None, None))
+vmap_obs_nllik_iclrs = vmap(val_neg_log_likelihood_pars_z_av_iclrs, in_axes=(None, None, None, 0, 0, None, None, None, None))
+vmap_av_nllik_iclrs = vmap(vmap_obs_nllik_iclrs, in_axes=(None, None, 0, None, None, None, None, None, None))
 
 
 @partial(vmap, in_axes=(None, 0, None, None, None, None, None, None, None))
-def vmap_z_nllik_iclrs(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data, iband_num):
+def vmap_z_nllik_iclrs(templ_pars, z, av, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data, iband_num):
     r"""vmap_z_nllik_iclrs Computes the negative log likelihood of the redshift with one template for all observations, vmapped on redshifts and dust absorptions.
     This is a reduced $\chi^2$ and does not use a prior probability distribution.
 
@@ -437,7 +403,7 @@ def vmap_z_nllik_iclrs(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_tran
     :type templ_pars: array of floats
     :param z: Redshift value
     :type z: float
-    :param anu: Dust law attenuation parameter
+    :param av: Dust law attenuation parameter
     :type z: float
     :param gal_cols: Color indices of the observed object
     :type gal_cols: array of floats
@@ -446,22 +412,22 @@ def vmap_z_nllik_iclrs(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_tran
     :return: Likelihood of the redshift zp, if represented by the given template.
     :rtype: float
     """
-    return jnp.nanmin(vmap_anu_nllik_iclrs(templ_pars, z, anu, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data, iband_num), axis=0)
+    return jnp.nanmin(vmap_av_nllik_iclrs(templ_pars, z, av, gal_cols, gel_colerrs, wls, filt_trans_arr, ssp_data, iband_num), axis=0)
 
 
 vmap_templ_nllik_iclrs = vmap(vmap_z_nllik_iclrs, in_axes=(0, None, None, None, None, None, None, None, None))
 
 
 @jit
-def val_prior_pars_z_anu(templ_pars, z, anu, gal_iab, wls, nuvk_trans_arr, ssp_data):
-    """val_prior_pars_z_anu _summary_
+def val_prior_pars_z_av(templ_pars, z, av, gal_iab, wls, nuvk_trans_arr, ssp_data):
+    """val_prior_pars_z_av _summary_
 
     :param templ_pars: _description_
     :type templ_pars: _type_
     :param z: _description_
     :type z: _type_
-    :param anu: _description_
-    :type anu: _type_
+    :param av: _description_
+    :type av: _type_
     :param gal_iab: _description_
     :type gal_iab: _type_
     :param wls: _description_
@@ -475,7 +441,7 @@ def val_prior_pars_z_anu(templ_pars, z, anu, gal_iab, wls, nuvk_trans_arr, ssp_d
     """
     from .template import ssp_spectrum_fromparam, vmap_calc_rest_mag
 
-    _pars = templ_pars.at[13].set(anu)
+    _pars = templ_pars.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
     ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(_pars, z, ssp_data)
     _mags = vmap_calc_rest_mag(ssp_wave, sed_attenuated, wls, nuvk_trans_arr)
@@ -484,22 +450,22 @@ def val_prior_pars_z_anu(templ_pars, z, anu, gal_iab, wls, nuvk_trans_arr, ssp_d
     return nz_prior
 
 
-vmap_obs_prior_pars_zanu = vmap(val_prior_pars_z_anu, in_axes=(None, None, None, 0, None, None, None))
-vmap_anu_prior_pars_zanu = vmap(vmap_obs_prior_pars_zanu, in_axes=(None, None, 0, None, None, None, None))
-vmap_z_prior_pars_zanu = vmap(vmap_anu_prior_pars_zanu, in_axes=(None, 0, None, None, None, None, None))
-vmap_templ_prior_pars_zanu = vmap(vmap_z_prior_pars_zanu, in_axes=(0, None, None, None, None, None, None))
+vmap_obs_prior_pars_zav = vmap(val_prior_pars_z_av, in_axes=(None, None, None, 0, None, None, None))
+vmap_av_prior_pars_zav = vmap(vmap_obs_prior_pars_zav, in_axes=(None, None, 0, None, None, None, None))
+vmap_z_prior_pars_zav = vmap(vmap_av_prior_pars_zav, in_axes=(None, 0, None, None, None, None, None))
+vmap_templ_prior_pars_zav = vmap(vmap_z_prior_pars_zav, in_axes=(0, None, None, None, None, None, None))
 
 
 @jit
-def likelihood_pars_z_anu(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr, ssp_data):
-    """likelihood_pars_z_anu _summary_
+def likelihood_pars_z_av(templ_pars_arr, z_arr, av_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr, ssp_data):
+    """likelihood_pars_z_av _summary_
 
     :param templ_pars_arr: _description_
     :type templ_pars_arr: _type_
     :param z_arr: _description_
     :type z_arr: _type_
-    :param anu_arr: _description_
-    :type anu_arr: _type_
+    :param av_arr: _description_
+    :type av_arr: _type_
     :param obs_i_cols_arr: _description_
     :type obs_i_cols_arr: _type_
     :param obs_i_colerrs_arr: _description_
@@ -515,20 +481,20 @@ def likelihood_pars_z_anu(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_
     :return: _description_
     :rtype: _type_
     """
-    neglog_lik = vmap_templ_nllik(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr, ssp_data)
+    neglog_lik = vmap_templ_nllik(templ_pars_arr, z_arr, av_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr, ssp_data)
     return jnp.exp(-0.5 * neglog_lik)
 
 
 @jit
-def posterior_pars_z_anu(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_colerrs_arr, obs_iab, wls, filt_trans_arr, ssp_data):
-    """likelihood_pars_z_anu _summary_
+def posterior_pars_z_av(templ_pars_arr, z_arr, av_arr, obs_i_cols_arr, obs_i_colerrs_arr, obs_iab, wls, filt_trans_arr, ssp_data):
+    """likelihood_pars_z_av _summary_
 
     :param templ_pars_arr: _description_
     :type templ_pars_arr: _type_
     :param z_arr: _description_
     :type z_arr: _type_
-    :param anu_arr: _description_
-    :type anu_arr: _type_
+    :param av_arr: _description_
+    :type av_arr: _type_
     :param obs_i_cols_arr: _description_
     :type obs_i_cols_arr: _type_
     :param obs_i_colerrs_arr: _description_
@@ -544,8 +510,8 @@ def posterior_pars_z_anu(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_c
     :return: _description_
     :rtype: _type_
     """
-    chi2_arr = vmap_templ_nllik(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr[:-2, :], ssp_data)
-    prior_arr = vmap_templ_prior_pars_zanu(templ_pars_arr, z_arr, anu_arr, obs_iab, wls, filt_trans_arr[-2:, :], ssp_data)
+    chi2_arr = vmap_templ_nllik(templ_pars_arr, z_arr, av_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr[:-2, :], ssp_data)
+    prior_arr = vmap_templ_prior_pars_zav(templ_pars_arr, z_arr, av_arr, obs_iab, wls, filt_trans_arr[-2:, :], ssp_data)
     _n1 = 100.0 / jnp.nanmax(chi2_arr)
     neglog_lik = _n1 * chi2_arr
     res = jnp.power(jnp.exp(-0.5 * neglog_lik), 1 / _n1) * prior_arr
@@ -553,15 +519,15 @@ def posterior_pars_z_anu(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_c
 
 
 @jit
-def likelihood_pars_z_anu_iclrs(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr, ssp_data, iband_num):
-    """likelihood_pars_z_anu_iclrs _summary_
+def likelihood_pars_z_av_iclrs(templ_pars_arr, z_arr, av_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr, ssp_data, iband_num):
+    """likelihood_pars_z_av_iclrs _summary_
 
     :param templ_pars_arr: _description_
     :type templ_pars_arr: _type_
     :param z_arr: _description_
     :type z_arr: _type_
-    :param anu_arr: _description_
-    :type anu_arr: _type_
+    :param av_arr: _description_
+    :type av_arr: _type_
     :param obs_i_cols_arr: _description_
     :type obs_i_cols_arr: _type_
     :param obs_i_colerrs_arr: _description_
@@ -577,20 +543,20 @@ def likelihood_pars_z_anu_iclrs(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, 
     :return: _description_
     :rtype: _type_
     """
-    neglog_lik = vmap_templ_nllik_iclrs(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr, ssp_data, iband_num)
+    neglog_lik = vmap_templ_nllik_iclrs(templ_pars_arr, z_arr, av_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr, ssp_data, iband_num)
     return jnp.exp(-0.5 * neglog_lik)
 
 
 @jit
-def posterior_pars_z_anu_iclrs(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_colerrs_arr, obs_iab, wls, filt_trans_arr, ssp_data, iband_num):
-    """posterior_pars_z_anu_iclrs _summary_
+def posterior_pars_z_av_iclrs(templ_pars_arr, z_arr, av_arr, obs_i_cols_arr, obs_i_colerrs_arr, obs_iab, wls, filt_trans_arr, ssp_data, iband_num):
+    """posterior_pars_z_av_iclrs _summary_
 
     :param templ_pars_arr: _description_
     :type templ_pars_arr: _type_
     :param z_arr: _description_
     :type z_arr: _type_
-    :param anu_arr: _description_
-    :type anu_arr: _type_
+    :param av_arr: _description_
+    :type av_arr: _type_
     :param obs_i_cols_arr: _description_
     :type obs_i_cols_arr: _type_
     :param obs_i_colerrs_arr: _description_
@@ -608,8 +574,8 @@ def posterior_pars_z_anu_iclrs(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, o
     :return: _description_
     :rtype: _type_
     """
-    chi2_arr = vmap_templ_nllik_iclrs(templ_pars_arr, z_arr, anu_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr[:-2, :], ssp_data, iband_num)
-    prior_arr = vmap_templ_prior_pars_zanu(templ_pars_arr, z_arr, anu_arr, obs_iab, wls, filt_trans_arr[-2:, :], ssp_data)
+    chi2_arr = vmap_templ_nllik_iclrs(templ_pars_arr, z_arr, av_arr, obs_i_cols_arr, obs_i_colerrs_arr, wls, filt_trans_arr[:-2, :], ssp_data, iband_num)
+    prior_arr = vmap_templ_prior_pars_zav(templ_pars_arr, z_arr, av_arr, obs_iab, wls, filt_trans_arr[-2:, :], ssp_data)
     _n1 = 100.0 / jnp.nanmax(chi2_arr)
     neglog_lik = _n1 * chi2_arr
     res = jnp.power(jnp.exp(-0.5 * neglog_lik), 1 / _n1) * prior_arr
