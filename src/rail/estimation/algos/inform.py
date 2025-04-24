@@ -1,4 +1,5 @@
 import os
+import jax
 import numpy as np
 from jax import numpy as jnp
 #from jax import vmap, jit
@@ -7,16 +8,17 @@ from jax.tree_util import tree_map
 import pandas as pd
 #import qp
 from tqdm import tqdm
-import tables_io
 from ceci.config import StageParameter as Param
 from rail.estimation.estimator import CatInformer
 #from rail.utils.path_utils import RAILDIR
+from rail.core.data import TableHandle, ModelHandle
 from rail.core.common_params import SHARED_PARAMS
-from .io_utils import load_ssp, istuple
+from .io_utils import load_ssp, istuple, SHIREDATALOC
 from .analysis import _DUMMY_PARS #, PARS_DF, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
 from .template import vmap_cols_zo
 from .filter import get_sedpy
-from interpax import interp1d
+
+jax.config.update("jax_enable_x64", True)
 
 def nzfunc(z, z0, alpha, km, m, m0):  # pragma: no cover
     zm = z0 + (km * (m - m0))
@@ -24,6 +26,7 @@ def nzfunc(z, z0, alpha, km, m, m0):  # pragma: no cover
 
 class ShireInformer(CatInformer):
     name = "ShireInformer"
+    outputs = [("model", ModelHandle), ("templates", TableHandle)]
     config_options = CatInformer.config_options.copy()
     config_options.update(
         zmin=SHARED_PARAMS,
@@ -72,11 +75,26 @@ class ShireInformer(CatInformer):
             float,
             100.,
             msg='dwl (float): step of wavelength grid for filters interpolation'
+        ),
+        colrsbins=Param(
+            int,
+            40,
+            msg='colrsbins (int): number of bins for each colour index in which to select the template with the best score.'
         )
     )
 
     def __init__(self, args, **kwargs):
         super().__init__(args, **kwargs)
+        
+        datapath = self.config["data_path"]
+        if datapath is None or datapath == "None":
+            self.data_path = SHIREDATALOC
+        else:  # pragma: no cover
+            self.data_path = datapath
+            os.environ["SHIREDATALOC"] = self.data_path
+        if not os.path.exists(self.data_path):  # pragma: no cover
+            raise FileNotFoundError("SHIREDATALOC " + self.data_path + " does not exist! Check value of data_path in config file!")
+        
         self.fo_arr = None
         self.kt_arr = None
         self.typmask = None
@@ -84,8 +102,8 @@ class ShireInformer(CatInformer):
         self.mags = None
         self.szs = None
         self.besttypes = None
-        self.m0 = self.config.m0
-        self.templpars = None
+        self.m0 = None
+        self.templates_df = None
 
 
     def run(self):
@@ -100,6 +118,7 @@ class ShireInformer(CatInformer):
             raise KeyError(f"redshift column {self.config.redshift_col} not found in input data!")
 
         filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
+
         color_names = [f"{n1}-{n2}" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
         #color_err_names = [f"{n1}-{n2}_err" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
 
@@ -109,10 +128,8 @@ class ShireInformer(CatInformer):
         #    fmt='hf5'
         #)
 
-        self.mags = jnp.array(
-            training_data[
-                [f"mag_{_n}" for _n in filters_names]
-            ]
+        self.mags = jnp.column_stack(
+            [training_data[f"mag_{_n}"] for _n in filters_names]
         )
 
         self.szs = jnp.array(
@@ -140,6 +157,7 @@ class ShireInformer(CatInformer):
             columns=color_names+[self.config["redshift_col"]]
         )
 
+        '''
         templs_ref_df = tables_io.read(
             os.path.abspath(
                 os.path.join(
@@ -151,34 +169,35 @@ class ShireInformer(CatInformer):
             tables_io.types.PD_DATAFRAME,
             fmt='hf5'
         )
+        '''
+        
+        templs_ref_df = pd.read_hdf(
+            os.path.abspath(
+                os.path.join(
+                    self.data_path,
+                    "SED",
+                    self.config.spectra_file
+                )
+            ),
+            key="fit_dsps"
+        )
+        
         pars_arr = jnp.array(templs_ref_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
-
-        filts_tup = get_sedpy(self.config.filter_dict, self.config.data_path)
 
         wls = jnp.arange(
             self.config.wlmin,
-            self.config.wlmax+self.config.wlstep,
-            self.config.wlstep
+            self.config.wlmax+self.config.dwl,
+            self.config.dwl
         )
 
-        transm_arr = jnp.array(
-            [
-                interp1d(
-                    wls,
-                    _f.wavelength,
-                    _f.transmission,
-                    method="akima",
-                    extrap=0.0
-                ) for _f in filts_tup
-            ]
-        )
+        transm_arr = get_sedpy(self.config.filter_dict, wls, self.config.data_path)
 
         templ_tupl = [tuple(_pars) for _pars in pars_arr]
 
         ssp_data = load_ssp(
             os.path.abspath(
                 os.path.join(
-                    self.config.data_path,
+                    self.data_path,
                     "SSP",
                     self.config.ssp_file
                 )
@@ -201,9 +220,9 @@ class ShireInformer(CatInformer):
         for it, (tname, row) in enumerate(templs_ref_df.iterrows()):
             _colrs = templ_tupl_sps[it]
             _df = pd.DataFrame(columns=color_names, data=_colrs)
-            _df['z_p'] = self.pzs
-            _df['Dataset'] = np.full(self.pzs.shape, row['Dataset'])
-            _df['name'] = np.full(self.pzs.shape, tname)
+            _df['z_p'] = pzs
+            _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
+            _df['name'] = np.full(pzs.shape, tname)
             templs_as_dict.update({f"{tname}": _df})
         all_templs_df = pd.concat(
             [_df for _, _df in templs_as_dict.items()],
@@ -213,7 +232,7 @@ class ShireInformer(CatInformer):
         list_edges = []
         for idc, c in enumerate(color_names):
             _arr = np.array(train_df[c])
-            H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins=40) #, bins='auto') #
+            H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins=self.config.colrsbins) #, bins='auto') #
             H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
             #H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins='auto')
             #H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
@@ -235,12 +254,13 @@ class ShireInformer(CatInformer):
 
         best_templs_names = []
         allbestscores = []
+        print("Computing scores in colour bins:")
         for c in color_names:
             for cbin in tqdm(jnp.unique(train_df[f'{c}_bin'].values)):
             #cbin = row[f'{c}_bin']
                 sel = train_df[f'{c}_bin']==cbin
                 _sel_df = train_df[sel]
-                zs = jnp.array(_sel_df['redshift'].values)
+                zs = jnp.array(_sel_df[self.config["redshift_col"]].values)
                 sel_templ = all_templs_df[f'{c}_bin']==cbin
                 _templ_df = all_templs_df[sel_templ]
                 scores = jnp.array(
@@ -259,6 +279,7 @@ class ShireInformer(CatInformer):
         allbestscores = jnp.array(allbestscores)
 
         meanscores = []
+        print("Finalising templates:")
         for it, nt in tqdm(enumerate(best_templ_sels), total=len(best_templ_sels)):
             _sel = jnp.array([_t==nt for _t in best_templs_names])
             _sc = allbestscores[_sel]
@@ -271,11 +292,53 @@ class ShireInformer(CatInformer):
             templs_score_df.loc[tn, 'name'] = tn
         templs_score_df.sort_values('score', ascending=True, inplace=True)
 
+        '''
         tables_io.write(
             templs_score_df,
             'trained_templ.hf5',
             fmt='hf5'
         )
-        self.templpars = jnp.array(
-            templs_score_df[_DUMMY_PARS.PARAM_NAMES_FLAT]
-        )
+        '''
+        self.templates_df = templs_score_df[["name", "num", self.config["redshift_col"]]+_DUMMY_PARS.PARAM_NAMES_FLAT]
+        self.model = dict(
+            fo_arr=self.fo_arr,
+            kt_arr=self.kt_arr,
+            zo_arr=None,
+            km_arr=None,
+            a_arr=None,
+            mo=self.m0,
+            nt_array=None)
+        self.add_data("model", self.model)
+        self.add_data("templates", self.templates_df)
+
+
+    def inform(self, training_data):
+        """The main interface method for Informers
+
+        This will attach the input_data to this `Informer`
+        (for introspection and provenance tracking).
+
+        Then it will call the run() and finalize() methods, which need to
+        be implemented by the sub-classes.
+
+        The run() method will need to register the model that it creates to this Estimator
+        by using `self.add_data('model', model)`.
+
+        Finally, this will return a ModelHandle providing access to the trained model.
+
+        Parameters
+        ----------
+        input_data : `dict` or `TableHandle`
+            dictionary of all input data, or a `TableHandle` providing access to it
+
+        Returns
+        -------
+        model : ModelHandle
+            Handle providing access to trained model
+        templates : TableHandle
+            Handle providing access to selected templates as SPS parameters
+        """
+        self.set_data("input", training_data)
+        self.run()
+        self.finalize()
+        return self.get_handle("model"), self.get_handle("templates")

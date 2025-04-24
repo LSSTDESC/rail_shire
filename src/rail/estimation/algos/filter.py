@@ -54,6 +54,7 @@ def get_2lists(filter_list):
 def get_sedpy(filter_dict, wls, data_path="."):
     filts_tup = []
     val_sedpy = observate.list_available_filters()
+    print("Loading filters:")
     for _if, (fnam, fdir) in tqdm(enumerate(filter_dict.items()), total=len(filter_dict)):
         if fdir == "" or fdir is None:
             assert fnam in val_sedpy, f"Filter {_if} ({fnam}) is not available.\

@@ -1,19 +1,18 @@
 import os
+import jax
 from jax import numpy as jnp
 from jax.tree_util import tree_map
-import pandas as pd
 import qp
-import tables_io
 from ceci.config import StageParameter as Param
 from rail.estimation.estimator import CatEstimator
-from rail.utils.path_utils import RAILDIR
 from rail.core.common_params import SHARED_PARAMS
+from rail.core.data import TableHandle, ModelHandle
 
 from .analysis import _DUMMY_PARS, PARS_DF, vmap_mean, vmap_median
 from .galaxy import vmap_mags_to_i_and_colors, posterior, likelihood
 from .filter import get_sedpy
 from .template import make_legacy_templates, make_sps_templates, istuple
-from .io_utils import load_ssp
+from .io_utils import load_ssp, SHIREDATALOC
 
 try:
     from jax.numpy import trapezoid
@@ -22,6 +21,8 @@ except ImportError:
         from jax.scipy.integrate import trapezoid
     except ImportError:
         from jax.numpy import trapz as trapezoid
+
+jax.config.update("jax_enable_x64", True)
 
 class ShireEstimator(CatEstimator):
     """CatEstimator subclass to implement basic marginalized PDF for BPZ
@@ -35,6 +36,7 @@ class ShireEstimator(CatEstimator):
     at other redshifts
     """
     name = "ShireEstimator"
+    inputs = [("model", ModelHandle), ("input", TableHandle), ("templates", TableHandle)]
     config_options = CatEstimator.config_options.copy()
     config_options.update(
         zmin=SHARED_PARAMS,
@@ -60,11 +62,6 @@ class ShireEstimator(CatEstimator):
             "SED, FILTER, and AB directories.  If left to "
             "default `None` it will use the install "
             "directory for rail + ../examples_data/estimation_data/data"),
-        spectra_file=Param(
-            str,
-            "trained_templ.hf5",
-            msg="name of the file specifying the set of templates."
-        ),
         templ_type=Param(
             str,
             "SPS",
@@ -112,14 +109,12 @@ class ShireEstimator(CatEstimator):
 
         datapath = self.config["data_path"]
         if datapath is None or datapath == "None":
-            tmpdatapath = os.path.join(RAILDIR, "rail/examples_data/estimation_data/data")
-            os.environ["SHIREDATAPATH"] = tmpdatapath
-            self.data_path = tmpdatapath
+            self.data_path = SHIREDATALOC
         else:  # pragma: no cover
             self.data_path = datapath
-            os.environ["SHIREDATAPATH"] = self.data_path
+            os.environ["SHIREDATALOC"] = self.data_path
         if not os.path.exists(self.data_path):  # pragma: no cover
-            raise FileNotFoundError("SHIREDATAPATH " + self.data_path + " does not exist! Check value of data_path in config file!")
+            raise FileNotFoundError("SHIREDATALOC " + self.data_path + " does not exist! Check value of data_path in config file!")
 
         # check on bands, errs, and prior band
         if len(self.config.bands) != len(self.config.err_bands):  # pragma: no cover
@@ -133,6 +128,7 @@ class ShireEstimator(CatEstimator):
         self.colrs_templates=None
         self.zgrid=None
         self.avgrid=None
+        self.templates=None
 
     def _initialize_run(self):
         super()._initialize_run()
@@ -163,11 +159,41 @@ class ShireEstimator(CatEstimator):
         self.modeldict = self.model
 
 
+    def open_templates(self, **kwargs):
+        """Load the templates parameters and attach them to this Estimator
+
+        Parameters
+        ----------
+        templates : ``object``, ``str`` or ``TableHandle``
+            Either an object with the array of parameters, a path pointing to a file
+            that can be read to obtain the templates, or a `TableHandle`
+            providing access to the templates.
+
+        Returns
+        -------
+        self.templates : ``object``
+            The object encapsulating the templates.
+        """
+        templates = kwargs.get("templates", None)
+        if templates is None or templates == "None":
+            self.templates = None
+            return self.templates
+        if isinstance(templates, str):
+            self.templates = self.set_data("templates", data=None, path=templates)
+            self.config["templates"] = templates
+            return self.templates
+        if isinstance(templates, TableHandle):
+            if templates.has_path:
+                self.config["templates"] = templates.path
+        self.templates = self.set_data("templates", templates)
+        return self.templates
+
+
     def _load_filters(self):
         wls = jnp.arange(
             self.config.wlmin,
-            self.config.wlmax+self.config.wlstep,
-            self.config.wlstep
+            self.config.wlmax+self.config.dwl,
+            self.config.dwl
         )
 
         transm_arr = get_sedpy(self.config.filter_dict, wls, self.data_path)
@@ -200,13 +226,25 @@ class ShireEstimator(CatEstimator):
 
         fwls, ftransm = self._load_filters()
 
+        '''
         spectra_file = os.path.join(self.data_path, "SED", self.config.spectra_file)
+        if not os.path.isfile(spectra_file):
+            print(f"{spectra_file} does not exist ! Trying with local file instead :")
+            spectra_file = os.path.abspath(self.config.spectra_file)
+            if os.path.isfile(spectra_file):
+                print(f"New file: {spectra_file}")
+            else:
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), spectra_file)
+
         templs_df = tables_io.read(
             spectra_file,
             tables_io.types.PD_DATAFRAME,
             fmt='hf5'
         )
+        '''
+        templs_df = self.open_templates(**self.config)
         templ_pars_arr = jnp.array(templs_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+
         zref_arr = jnp.array(templs_df[self.config.redshift_col])
         if "sps" in self.config.templ_type.lower():
             tcolors = make_sps_templates(
@@ -231,6 +269,8 @@ class ShireEstimator(CatEstimator):
         return tcolors
 
     def _preprocess_magnitudes(self, data):
+        
+        """
         # replace non-detects with NaN and mag_err with lim_mag for consistency
         # with typical BPZ performance
         for bandname, errname in zip(self.config.bands, self.config.err_bands, strict=True):
@@ -259,16 +299,17 @@ class ShireEstimator(CatEstimator):
             else:
                 data[bandname][obsmask] = jnp.nan
                 data[errname][obsmask] = 20.0
+        """
 
-        obs_mags = jnp.array(data[self.config.bands])
-        obs_mags_errs = jnp.array(data[self.config.err_bands])
+        obs_mags = jnp.column_stack([data[_b] for _b in self.config.bands])
+        obs_mags_errs = jnp.column_stack([data[_b] for _b in self.config.err_bands])
         
         # Clip to min mag errors.
         # JZ: Changed the max value here to 20 as values in the lensfit
         # catalog of ~ 200 were causing underflows below that turned into
         # zero errors on the fluxes and then nans in the output
         
-        obs_mags_errs = jnp.clip(obs_mags_errs, self.config.mag_err_min, 20)
+        #obs_mags_errs = jnp.clip(obs_mags_errs, self.config.mag_err_min, 20)
         
         id_i_band = self.config.bands.index(self.config.ref_band)
         i_mag_ab, ab_colors, ab_cols_errs = (
@@ -323,7 +364,7 @@ class ShireEstimator(CatEstimator):
             test_m_0
         )
         
-        qp_dstn = qp.Ensemble(qp.interp, data=dict(xvals=self.zgrid, yvals=pdfs))
+        qp_dstn = qp.Ensemble(qp.interp, data=dict(xvals=self.zgrid, yvals=pdfs.T))
         
         zmeans = vmap_mean(self.zgrid, pdfs)
         zmedians = vmap_median(self.zgrid, pdfs)

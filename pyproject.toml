@@ -85,7 +85,8 @@ disable = [
     "no-member",
     "not-callable",
     "trailing-whitespace",
-    "too-many-instance-attributes"
+    "too-many-instance-attributes",
+    "relative-beyond-top-level"
 ]
 max-line-length = 200
 max-locals = 100

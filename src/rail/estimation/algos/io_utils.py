@@ -18,12 +18,9 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 try:
     SHIREDATALOC = os.environ["SHIREDATALOC"]
 except KeyError:
-    try:
-        SHIREDATALOC = input("Please type in the path to FORS2 data, e.g. /home/usr/rail_shire/examples/data")
-        os.environ["SHIREDATALOC"] = SHIREDATALOC
-    except Exception:
-        SHIREDATALOC = os.path.join(_script_dir, "../../../examples", "data")
-        os.environ["SHIREDATALOC"] = SHIREDATALOC
+    SHIREDATALOC = os.path.abspath(os.path.join(_script_dir, "../../../examples", "data"))
+    os.environ["SHIREDATALOC"] = SHIREDATALOC
+print(f"Default location for rail_shire data set to {SHIREDATALOC}.")
 
 DEFAULTS_DICT = {}
 FILENAME_SSP_DATA = "ssp_data_fsps_v3.2_lgmet_age.h5"
