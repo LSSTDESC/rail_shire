@@ -289,7 +289,7 @@ class ShireInformer(CatInformer):
 
         templs_score_df = templs_ref_df.loc[best_templ_sels]
         for msc, tn in zip(meanscores, best_templ_sels):
-            templs_score_df.loc[tn, 'score'] = msc
+            templs_score_df.loc[tn, 'score'] = float(msc)
             templs_score_df.loc[tn, 'name'] = tn
         templs_score_df.sort_values('score', ascending=True, inplace=True)
 
