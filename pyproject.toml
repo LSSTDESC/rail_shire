@@ -22,7 +22,7 @@ dependencies = [
     "h5py",
     "tqdm",
     "diffstar<=0.3.2",
-    "diffmah",
+    "diffmah<=0.6.1",
     "dsps",
     "jax",
     "jaxlib",
