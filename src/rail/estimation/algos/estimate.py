@@ -276,9 +276,9 @@ class ShireEstimator(CatEstimator):
         # with typical BPZ performance
         for bandname, errname in zip(self.config.bands, self.config.err_bands, strict=True):
             if jnp.isnan(self.config.nondetect_val):  # pragma: no cover
-                detmask = jnp.isnan(data[bandname])
+                detmask = jnp.isnan(jnp.array(data[bandname]))
             else:
-                detmask = jnp.isclose(data[bandname], self.config.nondetect_val)
+                detmask = jnp.isclose(jnp.array(data[bandname]), self.config.nondetect_val)
             if isinstance(data, pd.DataFrame):
                 data.loc[detmask, bandname] = jnp.nan
                 data.loc[detmask, errname] = self.config.mag_limits[bandname]
@@ -291,9 +291,9 @@ class ShireEstimator(CatEstimator):
         # flux errors
         for bandname, errname in zip(self.config.bands, self.config.err_bands, strict=True):
             if jnp.isnan(self.config.unobserved_val):  # pragma: no cover
-                obsmask = jnp.isnan(data[bandname])
+                obsmask = jnp.isnan(jnp.array(data[bandname]))
             else:
-                obsmask = jnp.isclose(data[bandname], self.config.unobserved_val)
+                obsmask = jnp.isclose(jnp.array(data[bandname]), self.config.unobserved_val)
             if isinstance(data, pd.DataFrame):
                 data.loc[obsmask, bandname] = jnp.nan
                 data.loc[obsmask, errname] = 20.0
