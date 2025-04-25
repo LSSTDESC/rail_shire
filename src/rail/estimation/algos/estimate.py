@@ -3,6 +3,7 @@ import jax
 from jax import numpy as jnp
 from jax.tree_util import tree_map
 import qp
+import pandas as pd
 from ceci.config import StageParameter as Param
 from rail.estimation.estimator import CatEstimator
 from rail.core.common_params import SHARED_PARAMS
@@ -270,7 +271,7 @@ class ShireEstimator(CatEstimator):
 
     def _preprocess_magnitudes(self, data):
         
-        """
+
         # replace non-detects with NaN and mag_err with lim_mag for consistency
         # with typical BPZ performance
         for bandname, errname in zip(self.config.bands, self.config.err_bands, strict=True):
@@ -299,7 +300,7 @@ class ShireEstimator(CatEstimator):
             else:
                 data[bandname][obsmask] = jnp.nan
                 data[errname][obsmask] = 20.0
-        """
+
 
         obs_mags = jnp.column_stack([data[_b] for _b in self.config.bands])
         obs_mags_errs = jnp.column_stack([data[_b] for _b in self.config.err_bands])
@@ -309,7 +310,7 @@ class ShireEstimator(CatEstimator):
         # catalog of ~ 200 were causing underflows below that turned into
         # zero errors on the fluxes and then nans in the output
         
-        #obs_mags_errs = jnp.clip(obs_mags_errs, self.config.mag_err_min, 20)
+        obs_mags_errs = jnp.clip(obs_mags_errs, self.config.mag_err_min, 20)
         
         id_i_band = self.config.bands.index(self.config.ref_band)
         i_mag_ab, ab_colors, ab_cols_errs = (
