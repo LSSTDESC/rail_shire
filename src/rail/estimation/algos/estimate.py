@@ -3,7 +3,7 @@ import jax
 from jax import numpy as jnp
 from jax.tree_util import tree_map
 import qp
-import pandas as pd
+#import pandas as pd
 from ceci.config import StageParameter as Param
 from rail.estimation.estimator import CatEstimator
 from rail.core.common_params import SHARED_PARAMS
@@ -270,37 +270,41 @@ class ShireEstimator(CatEstimator):
         return tcolors
 
     def _preprocess_magnitudes(self, data):
-        
 
         # replace non-detects with NaN and mag_err with lim_mag for consistency
         # with typical BPZ performance
         for bandname, errname in zip(self.config.bands, self.config.err_bands, strict=True):
+            _dat, _err = jnp.array(data[bandname]), jnp.array(data[errname])
             if jnp.isnan(self.config.nondetect_val):  # pragma: no cover
-                detmask = jnp.isnan(jnp.array(data[bandname]))
+                detmask = jnp.isnan(_dat)
             else:
-                detmask = jnp.isclose(jnp.array(data[bandname]), self.config.nondetect_val)
-            if isinstance(data, pd.DataFrame):
-                data.loc[detmask, bandname] = jnp.nan
-                data.loc[detmask, errname] = self.config.mag_limits[bandname]
-            else:
-                data[bandname][detmask] = jnp.nan
-                data[errname][detmask] = self.config.mag_limits[bandname]
+                detmask = jnp.isclose(_dat, self.config.nondetect_val)
+            # if isinstance(data, pd.DataFrame):
+            #     data.loc[detmask, bandname] = jnp.nan
+            #     data.loc[detmask, errname] = self.config.mag_limits[bandname]
+            # else:
+            #     data[bandname][detmask] = jnp.nan
+            #     data[errname][detmask] = self.config.mag_limits[bandname]
+            data[bandname] = jnp.where(detmask, jnp.nan, _dat)
+            data[errname] = jnp.where(detmask, self.config.mag_limits[bandname], _err)
 
         # replace non-observations with NaN, again to match BPZ standard
         # below the fluxes for these will be set to zero but with enormous
         # flux errors
         for bandname, errname in zip(self.config.bands, self.config.err_bands, strict=True):
+            _dat, _err = jnp.array(data[bandname]), jnp.array(data[errname])
             if jnp.isnan(self.config.unobserved_val):  # pragma: no cover
-                obsmask = jnp.isnan(jnp.array(data[bandname]))
+                obsmask = jnp.isnan(_dat)
             else:
-                obsmask = jnp.isclose(jnp.array(data[bandname]), self.config.unobserved_val)
-            if isinstance(data, pd.DataFrame):
-                data.loc[obsmask, bandname] = jnp.nan
-                data.loc[obsmask, errname] = 20.0
-            else:
-                data[bandname][obsmask] = jnp.nan
-                data[errname][obsmask] = 20.0
-
+                obsmask = jnp.isclose(_dat, self.config.unobserved_val)
+            # if isinstance(data, pd.DataFrame):
+            #     data.loc[obsmask, bandname] = jnp.nan
+            #     data.loc[obsmask, errname] = 20.0
+            # else:
+            #     data[bandname][obsmask] = jnp.nan
+            #     data[errname][obsmask] = 20.0
+            data[bandname] = jnp.where(obsmask, jnp.nan, _dat)
+            data[errname] = jnp.where(obsmask, 20.0, _err)
 
         obs_mags = jnp.column_stack([data[_b] for _b in self.config.bands])
         obs_mags_errs = jnp.column_stack([data[_b] for _b in self.config.err_bands])
