@@ -21,7 +21,7 @@ dependencies = [
     "astropy",
     "h5py",
     "tqdm",
-    "diffstar",
+    "diffstar<=0.3.2",
     "diffmah",
     "dsps",
     "jax",
