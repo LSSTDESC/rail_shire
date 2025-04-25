@@ -299,7 +299,7 @@ class ShireInformer(CatInformer):
             fmt='hf5'
         )
         '''
-        self.templates_df = templs_score_df[["name", "num", self.config["redshift_col"]]+_DUMMY_PARS.PARAM_NAMES_FLAT]
+        self.templates_df = templs_score_df[["name", "num", "score", "Dataset", self.config["redshift_col"]]+_DUMMY_PARS.PARAM_NAMES_FLAT]
         self.model = dict(
             fo_arr=self.fo_arr,
             kt_arr=self.kt_arr,

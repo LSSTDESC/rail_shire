@@ -161,16 +161,16 @@ def read_h5_table(templ_h5_file, group="fit_dsps", classif="Classification"):
 
 def plot_zp_zs_ensemble(ens_PDFs, z_true, z_grid=None, key_estim="zmode", label='', bins=100):
     f, ax = plt.subplots(1, 1, figsize=(7, 6))
-    z_grid = jnp.array(ens_PDFs[0].dist.xvals) if z_grid is None else z_grid
+    z_grid = jnp.squeeze(jnp.array(ens_PDFs[0].dist.xvals, dtype=jnp.float64)) if z_grid is None else z_grid
     zp = jnp.squeeze(ens_PDFs.mode(z_grid)) if key_estim is None else ens_PDFs.ancil[key_estim]
-    zs = z_true #ens_PDFs.ancil[key_truth]
+    zs = jnp.squeeze(z_true) #ens_PDFs.ancil[key_truth]
     bias = zp - zs
     errz = bias/(1+zs)
     _, sigscat, medscat = jnp.mean(errz), jnp.std(errz), jnp.median(errz)
     mad = jnp.median(jnp.abs(errz)) # - medscat))
     sig_mad = 1.4826 * mad
     outliers = jnp.nonzero(jnp.abs(errz)*100.0 > 15) #3*sigscat) #
-    outl_rate = len(zs[outliers]) / len(zs)
+    outl_rate = zs[outliers].shape[0] / zs.shape[0]
 
     density = ax.hexbin(zs, zp, bins='log', gridsize=bins)
     ax.plot(z_grid, z_grid, c="k", ls=":", lw=1)
@@ -254,12 +254,11 @@ def plot_zp_zs_hdf5BPZ(pdfs_hdf5, zs, key_zgrid='xvals', key_estim='zmode', labe
     return ax
 
 
-def hist_outliers(qp_ens_1, ztrue, z_grid=None, key_estim='zmode', label1='', qp_ens_2=None, label2='', qp_ens_3=None, label3=''):
+def hist_outliers(qp_ens_1, zs, z_grid=None, key_estim='zmode', label1='', qp_ens_2=None, label2='', qp_ens_3=None, label3=''):
     f, ax = plt.subplots(1, 1, figsize=(7, 6))
 
-    z_grid = jnp.array(qp_ens_1[0].dist.xvals) if z_grid is None else z_grid
+    z_grid = jnp.squeeze(jnp.array(qp_ens_1[0].dist.xvals, dtype=jnp.float64)) if z_grid is None else z_grid
     zp1 = jnp.squeeze(qp_ens_1.mode(z_grid)) if key_estim is None else qp_ens_1.ancil[key_estim]
-    zs = ztrue
 
     bias1 = zp1 - zs
     errz1 = bias1/(1+zs)
