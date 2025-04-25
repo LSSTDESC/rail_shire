@@ -232,10 +232,11 @@ class ShireInformer(CatInformer):
         list_edges = []
         for idc, c in enumerate(color_names):
             _arr = np.array(train_df[c])
-            H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins=self.config.colrsbins) #, bins='auto') #
-            H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
+            #H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins=self.config.colrsbins) #, bins='auto') #
+            #H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
             #H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins='auto')
             #H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
+            _edges1d = np.histogram_bin_edges(_arr[np.isfinite(_arr)], bins=self.config.colrsbins)
             list_edges.append(_edges1d)
 
         coords = []

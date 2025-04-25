@@ -68,7 +68,7 @@ class ShireEstimator(CatEstimator):
             "SPS",
             msg='Whether to use the "SPS" or "Legacy" method to derive the templates colours from the SPS parameters.'
         ),
-        no_prior=Param(bool, True, msg="set to True if you want to run with no prior"),
+        no_prior=Param(bool, True, msg="set to True if you want to run without prior"),
         mag_err_min=Param(
             float,
             0.005,
@@ -248,6 +248,7 @@ class ShireEstimator(CatEstimator):
 
         zref_arr = jnp.array(templs_df[self.config.redshift_col])
         if "sps" in self.config.templ_type.lower():
+            print(f"Building templates with Stellar Population Synthesis... [templ_type={self.config.templ_type}]")
             tcolors = make_sps_templates(
                 templ_pars_arr,
                 fwls,
@@ -257,6 +258,7 @@ class ShireEstimator(CatEstimator):
                 sspdata
             )
         else:
+            print(f"Building templates from a rest-frame SED... [templ_type={self.config.templ_type}]")
             tcolors = make_legacy_templates(
                 templ_pars_arr,
                 zref_arr,
@@ -286,7 +288,7 @@ class ShireEstimator(CatEstimator):
             #     data[bandname][detmask] = jnp.nan
             #     data[errname][detmask] = self.config.mag_limits[bandname]
             data[bandname] = jnp.where(detmask, jnp.nan, _dat)
-            data[errname] = jnp.where(detmask, self.config.mag_limits[bandname], _err)
+            data[errname] = jnp.where(detmask, jnp.nan, _err)
 
         # replace non-observations with NaN, again to match BPZ standard
         # below the fluxes for these will be set to zero but with enormous
@@ -304,7 +306,7 @@ class ShireEstimator(CatEstimator):
             #     data[bandname][obsmask] = jnp.nan
             #     data[errname][obsmask] = 20.0
             data[bandname] = jnp.where(obsmask, jnp.nan, _dat)
-            data[errname] = jnp.where(obsmask, 20.0, _err)
+            data[errname] = jnp.where(obsmask, jnp.nan, _err)
 
         obs_mags = jnp.column_stack([data[_b] for _b in self.config.bands])
         obs_mags_errs = jnp.column_stack([data[_b] for _b in self.config.err_bands])
