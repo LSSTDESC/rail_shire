@@ -212,7 +212,7 @@ class ShireInformer(CatInformer):
             fmt='hf5'
         )
         '''
-        templs_df = self.open_templates(**self.config)
+        templs_df = self.templates_df
         templ_pars_arr = jnp.array(templs_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
         templ_tupl = [tuple(_pars) for _pars in templ_pars_arr]
 
