@@ -30,7 +30,9 @@ dependencies = [
     "jax_cosmo",
     "pandas",
     "pz-rail-dsps",
-    "astro-sedpy"
+    "astro-sedpy",
+    "matplotlib",
+    "seaborn"
 ]
 
 # On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
