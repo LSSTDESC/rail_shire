@@ -247,6 +247,7 @@ class ShireInformer(CatInformer):
 
 
     def run(self):
+        wls, transm_arr = self._load_filters()
         self._load_training()
 
         train_df = pd.DataFrame(
@@ -268,8 +269,6 @@ class ShireInformer(CatInformer):
         )
 
         pars_arr = jnp.array(templs_ref_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
-
-        wls, transm_arr = self._load_filters()
 
         templ_tupl = [tuple(_pars) for _pars in pars_arr]
 
