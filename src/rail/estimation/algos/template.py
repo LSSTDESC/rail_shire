@@ -320,8 +320,8 @@ def calc_eqw(sur_wls, sur_spec, lin):
     float
         Value of the nequivalent width of spectral line at $\lambda=$`lin`.
     """
-    line_wid = lin * 600 / C_KMS / 2
-    cont_wid = lin * 3000 / C_KMS / 2
+    line_wid = lin * 500 / C_KMS / 2
+    cont_wid = lin * 1500 / C_KMS / 2
     sur_flam = lsunPerHz_to_flam_noU(sur_wls, sur_spec, 0.001)
     nancont = jnp.where(jnp.logical_or(jnp.logical_and(sur_wls > lin - cont_wid, sur_wls < lin - line_wid), jnp.logical_and(sur_wls > lin + line_wid, sur_wls < lin + cont_wid)), sur_flam, jnp.nan)
     height = jnp.nanmean(nancont)
@@ -431,28 +431,34 @@ vmap_iclrs_zobs = vmap(vmap_iclrs_av, in_axes=(None, None, None, 0, None, None, 
 vmap_iclrs_pars = vmap(vmap_iclrs_zobs, in_axes=(0, None, None, None, None, None, None))
 
 
-# @jit
-def calc_nuvk(wls, params_dict, zobs, ssp_data):
-    """calc_nuvk Computes the theoretical emitted NUV-IR color index of a reference galaxy.
+@jit
+def calc_nuvk(pars_arr, wls, z_obs, ssp_data):
+    """calc_nuvk _summary_
 
-    :param wls: Wavelengths
-    :type wls: array
-    :param params_dict: DSPS input parameters to compute the restframe NUV and NIR photometry.
-    :type params_dict: dict
-    :param zobs: Redshift value
-    :type zobs: float
-    :return: NUV-NIR color index
-    :rtype: float
+    :param pars_arr: _description_
+    :type pars_arr: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
     """
-    from .filter import ab_mag
+    sed_attenuated = mean_spectrum(wls, pars_arr, z_obs, ssp_data)
+    _nuvk = jnp.array(
+        [
+            calc_rest_mag(wls, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(wls, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
+        ]
+    )
 
-    rest_sed = mean_spectrum(wls, params_dict, zobs, ssp_data)
-    nuv = ab_mag(NUV_filt.wavelengths, NUV_filt.transmission, wls, rest_sed)
-    nir = ab_mag(NIR_filt.wavelengths, NIR_filt.transmission, wls, rest_sed)
-    return nuv - nir
+    return _nuvk[0]-_nuvk[1]
 
 
-v_nuvk = vmap(calc_nuvk, in_axes=(None, None, 0, None))
+v_nuvk_zo = vmap(calc_nuvk, in_axes=(None, None, 0, None))
+v_nuvk = vmap(v_nuvk_zo, in_axes=(0, None, None, None))
 
 
 def get_colors_templates(params, wls, z_obs, transm_arr, ssp_data):
@@ -916,14 +922,16 @@ vmap_bpt_rews_dusty = vmap(bpt_rews_pars_zo_dusty, in_axes=(0, None, None))
 def colrs_bptrews_templ_zo(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
-    return jnp.column_stack((t_colors, t_rews))
+    t_nuvk = v_nuvk_zo(wls, templ_pars, zobs, ssp_data)
+    return jnp.column_stack((t_colors, t_rews, t_nuvk))
 
 vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
 
 def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
-    return jnp.column_stack((t_colors, t_rews))
+    t_nuvk = v_nuvk_zo(wls, templ_pars, zobs, ssp_data)
+    return jnp.column_stack((t_colors, t_rews, t_nuvk))
 
 vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
 

@@ -24,6 +24,7 @@ from .io_utils import load_ssp, istuple, SHIREDATALOC
 from .analysis import _DUMMY_PARS #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
 from .template import vmap_cols_zo, colrs_bptrews_templ_zo, lim_HII_comp, lim_seyf_liner, Ka03_nii, Ke01_nii, Ke01_oi, Ke01_sii, Ke06_oi, Ke06_sii
 from .filter import get_sedpy
+from .cosmology import prior_mod
 
 jax.config.update("jax_enable_x64", True)
 
@@ -242,7 +243,7 @@ class ShireInformer(CatInformer):
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_df.iterrows()):
             _colrrews = templ_tupl_sps[it]
-            _df = pd.DataFrame(columns=color_names+lines_names, data=_colrrews)
+            _df = pd.DataFrame(columns=color_names+['NUVK']+lines_names, data=_colrrews)
             _df['z_p'] = pzs
             _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
             _df['name'] = np.full(pzs.shape, tname)
@@ -559,9 +560,16 @@ class ShireInformer(CatInformer):
         return f
 
 
-    def _bpt_classif(self):
+    def _nuvk_classif(self):
+        _mod_names = ["E_S0", "Sbc", "Scd", "Irr"]
         self._load_training()
         all_tsels_df = self._load_templates()
+        all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
+        return all_tsels_df
+
+
+    def _bpt_classif(self):
+        all_tsels_df = self._nuvk_classif()
         all_tsels_df["log([OIII]/[Hb])"] = np.where(
             np.logical_and(all_tsels_df["AGN_[OIII]_5008.24_REW"] > 0.0, all_tsels_df["Balmer_HI_4862.68_REW"] > 0.0),
             np.log10(all_tsels_df["AGN_[OIII]_5008.24_REW"] / all_tsels_df["Balmer_HI_4862.68_REW"]),
@@ -674,6 +682,7 @@ class ShireInformer(CatInformer):
             if "NII" in cat:
                 a.plot(_x, Ka03_nii(_x), 'k-', lw=1)
                 a.plot(_x, Ke01_nii(_x), 'k-', lw=1)
+                a.set_xlim(np.nanmin(all_tsels_df[x]), 0.0)
             elif "SII" in cat:
                 a.plot(_x, Ke01_sii(_x), 'k-', lw=1)
                 a.plot(_x, Ke06_sii(_x), 'k-', lw=1)
@@ -683,8 +692,8 @@ class ShireInformer(CatInformer):
             else:
                 a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
                 a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
-            a.set_xlim(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]))
-            a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
+            
+            #a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
             fig_list.append(f)
             plt.show()
         return fig_list
