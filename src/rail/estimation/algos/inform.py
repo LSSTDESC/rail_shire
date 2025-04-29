@@ -562,39 +562,39 @@ class ShireInformer(CatInformer):
     def _bpt_classif(self):
         self._load_training()
         all_tsels_df = self._load_templates()
-        all_tsels_df["log([OIII]/[Hb])"] = jnp.where(
-            jnp.logical_and(all_tsels_df["AGN_[OIII]_5008.24_REW"] > 0.0, all_tsels_df["Balmer_HI_4862.68_REW"] > 0.0),
-            jnp.log10(all_tsels_df["AGN_[OIII]_5008.24_REW"] / all_tsels_df["Balmer_HI_4862.68_REW"]),
-            jnp.nan
+        all_tsels_df["log([OIII]/[Hb])"] = np.where(
+            np.logical_and(all_tsels_df["AGN_[OIII]_5008.24_REW"] > 0.0, all_tsels_df["Balmer_HI_4862.68_REW"] > 0.0),
+            np.log10(all_tsels_df["AGN_[OIII]_5008.24_REW"] / all_tsels_df["Balmer_HI_4862.68_REW"]),
+            np.nan
         )
 
-        all_tsels_df["log([NII]/[Ha])"] = jnp.where(
-            jnp.logical_and(all_tsels_df["AGN_[NII]_6585.27_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
-            jnp.log10(all_tsels_df["AGN_[NII]_6585.27_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
-            jnp.nan
+        all_tsels_df["log([NII]/[Ha])"] = np.where(
+            np.logical_and(all_tsels_df["AGN_[NII]_6585.27_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
+            np.log10(all_tsels_df["AGN_[NII]_6585.27_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
+            np.nan
         )
 
-        all_tsels_df["log([SII]/[Ha])"] = jnp.where(
-            jnp.logical_and(all_tsels_df["AGN_[SII]_6718.29_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
-            jnp.log10(all_tsels_df["AGN_[SII]_6718.29_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
-            jnp.nan
+        all_tsels_df["log([SII]/[Ha])"] = np.where(
+            np.logical_and(all_tsels_df["AGN_[SII]_6718.29_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
+            np.log10(all_tsels_df["AGN_[SII]_6718.29_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
+            np.nan
         )
 
-        all_tsels_df["log([OI]/[Ha])"] = jnp.where(
-            jnp.logical_and(all_tsels_df["SF_[OI]_6302.046_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
-            jnp.log10(all_tsels_df["SF_[OI]_6302.046_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
-            jnp.nan
+        all_tsels_df["log([OI]/[Ha])"] = np.where(
+            np.logical_and(all_tsels_df["SF_[OI]_6302.046_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
+            np.log10(all_tsels_df["SF_[OI]_6302.046_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
+            np.nan
         )
 
-        all_tsels_df["log([OIII]/[OII])"] = jnp.where(
-            jnp.logical_and(all_tsels_df["AGN_[OIII]_5008.24_REW"] > 0.0, all_tsels_df["SF_[OII]_3728.48_REW"] > 0),
-            jnp.log10(all_tsels_df["AGN_[OIII]_5008.24_REW"] / all_tsels_df["SF_[OII]_3728.48_REW"]),
-            jnp.nan
+        all_tsels_df["log([OIII]/[OII])"] = np.where(
+            np.logical_and(all_tsels_df["AGN_[OIII]_5008.24_REW"] > 0.0, all_tsels_df["SF_[OII]_3728.48_REW"] > 0),
+            np.log10(all_tsels_df["AGN_[OIII]_5008.24_REW"] / all_tsels_df["SF_[OII]_3728.48_REW"]),
+            np.nan
         )
 
         cat_nii = []
         for x, y in zip(all_tsels_df["log([NII]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
-            if not (jnp.isfinite(x) and jnp.isfinite(y)):
+            if not (np.isfinite(x) and np.isfinite(y)):
                 cat_nii.append("NC")
             elif y < Ka03_nii(x):
                 cat_nii.append("Star-forming")
@@ -607,7 +607,7 @@ class ShireInformer(CatInformer):
 
         cat_sii = []
         for x, y in zip(all_tsels_df["log([SII]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
-            if not (jnp.isfinite(x) and jnp.isfinite(y)):
+            if not (np.isfinite(x) and np.isfinite(y)):
                 cat_sii.append("NC")
             elif y < Ke01_sii(x):
                 cat_sii.append("Star-forming")
@@ -620,7 +620,7 @@ class ShireInformer(CatInformer):
 
         cat_oi = []
         for x, y in zip(all_tsels_df["log([OI]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
-            if not (jnp.isfinite(x) and jnp.isfinite(y)):
+            if not (np.isfinite(x) and np.isfinite(y)):
                 cat_oi.append("NC")
             elif y < Ke01_oi(x):
                 cat_oi.append("Star-forming")
@@ -633,7 +633,7 @@ class ShireInformer(CatInformer):
 
         cat_oii = []
         for x, y in zip(all_tsels_df["log([OI]/[Ha])"], all_tsels_df["log([OIII]/[OII])"], strict=False):
-            if not (jnp.isfinite(x) and jnp.isfinite(y)):
+            if not (np.isfinite(x) and np.isfinite(y)):
                 cat_oii.append("NC")
             elif y < lim_HII_comp(x):
                 cat_oii.append("SF / composite")
