@@ -320,8 +320,8 @@ def calc_eqw(sur_wls, sur_spec, lin):
     float
         Value of the nequivalent width of spectral line at $\lambda=$`lin`.
     """
-    line_wid = lin * 300 / C_KMS / 2
-    cont_wid = lin * 1500 / C_KMS / 2
+    line_wid = lin * 600 / C_KMS / 2
+    cont_wid = lin * 3000 / C_KMS / 2
     sur_flam = lsunPerHz_to_flam_noU(sur_wls, sur_spec, 0.001)
     nancont = jnp.where(jnp.logical_or(jnp.logical_and(sur_wls > lin - cont_wid, sur_wls < lin - line_wid), jnp.logical_and(sur_wls > lin + line_wid, sur_wls < lin + cont_wid)), sur_flam, jnp.nan)
     height = jnp.nanmean(nancont)
@@ -915,7 +915,7 @@ vmap_bpt_rews_dusty = vmap(bpt_rews_pars_zo_dusty, in_axes=(0, None, None))
 
 def colrs_bptrews_templ_zo(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo(templ_pars, zobs, ssp_data)
-    t_colors = vmap_cols_zo_nodust(templ_pars, wls, zobs, transm_arr, ssp_data)
+    t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
     return jnp.column_stack((t_colors, t_rews))
 
 vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))

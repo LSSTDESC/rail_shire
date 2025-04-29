@@ -22,7 +22,7 @@ import seaborn as sns
 
 from .io_utils import load_ssp, istuple, SHIREDATALOC
 from .analysis import _DUMMY_PARS #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
-from .template import vmap_cols_zo, colrs_bptrews_templ_zo_dusty, lim_HII_comp, lim_seyf_liner, Ka03_nii, Ke01_nii, Ke01_oi, Ke01_sii, Ke06_oi, Ke06_sii
+from .template import vmap_cols_zo, colrs_bptrews_templ_zo, lim_HII_comp, lim_seyf_liner, Ka03_nii, Ke01_nii, Ke01_oi, Ke01_sii, Ke06_oi, Ke06_sii
 from .filter import get_sedpy
 
 jax.config.update("jax_enable_x64", True)
@@ -217,7 +217,7 @@ class ShireInformer(CatInformer):
         templ_tupl = [tuple(_pars) for _pars in templ_pars_arr]
 
         templ_tupl_sps = tree_map(
-            lambda partup: colrs_bptrews_templ_zo_dusty(
+            lambda partup: colrs_bptrews_templ_zo(
                 jnp.array(partup),
                 fwls,
                 pzs,
@@ -683,7 +683,8 @@ class ShireInformer(CatInformer):
             else:
                 a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
                 a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
-
+            a.set_xlim(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]))
+            a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
             fig_list.append(f)
             plt.show()
         return fig_list
