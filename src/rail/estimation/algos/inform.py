@@ -22,7 +22,7 @@ import seaborn as sns
 
 from .io_utils import load_ssp, istuple, SHIREDATALOC
 from .analysis import _DUMMY_PARS #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
-from .template import vmap_cols_zo
+from .template import vmap_cols_zo, colrs_bptrews_templ_zo_dusty, lim_HII_comp, lim_seyf_liner, Ka03_nii, Ke01_nii, Ke01_oi, Ke01_sii, Ke06_oi, Ke06_sii
 from .filter import get_sedpy
 
 jax.config.update("jax_enable_x64", True)
@@ -217,7 +217,7 @@ class ShireInformer(CatInformer):
         templ_tupl = [tuple(_pars) for _pars in templ_pars_arr]
 
         templ_tupl_sps = tree_map(
-            lambda partup: vmap_cols_zo(
+            lambda partup: colrs_bptrews_templ_zo_dusty(
                 jnp.array(partup),
                 fwls,
                 pzs,
@@ -230,10 +230,19 @@ class ShireInformer(CatInformer):
 
         filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
         color_names = [f"{n1}-{n2}" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
+        lines_names = [
+            "SF_[OII]_3728.48_REW",
+            "Balmer_HI_4862.68_REW",
+            "AGN_[OIII]_5008.24_REW",
+            "SF_[OI]_6302.046_REW",
+            "Balmer_HI_6564.61_REW",
+            "AGN_[NII]_6585.27_REW",
+            "AGN_[SII]_6718.29_REW"
+        ]
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_df.iterrows()):
-            _colrs = templ_tupl_sps[it]
-            _df = pd.DataFrame(columns=color_names, data=_colrs)
+            _colrrews = templ_tupl_sps[it]
+            _df = pd.DataFrame(columns=color_names+lines_names, data=_colrrews)
             _df['z_p'] = pzs
             _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
             _df['name'] = np.full(pzs.shape, tname)
@@ -527,7 +536,7 @@ class ShireInformer(CatInformer):
 
     def plot_sfh_templates(self):
         self._load_training()
-        
+
         from .template import vmap_mean_sfr, T_ARR
         srcs = np.unique(self.templates_df['Dataset'].values)
         fcolors = plt.cm.rainbow(np.linspace(0, 1, len(srcs)))
@@ -548,3 +557,133 @@ class ShireInformer(CatInformer):
         a.legend(handles=legs)
         plt.show()
         return f
+
+
+    def _bpt_classif(self):
+        self._load_training()
+        all_tsels_df = self._load_templates()
+        all_tsels_df["log([OIII]/[Hb])"] = jnp.where(
+            jnp.logical_and(all_tsels_df["AGN_[OIII]_5008.24_REW"] > 0.0, all_tsels_df["Balmer_HI_4862.68_REW"] > 0.0),
+            jnp.log10(all_tsels_df["AGN_[OIII]_5008.24_REW"] / all_tsels_df["Balmer_HI_4862.68_REW"]),
+            jnp.nan
+        )
+
+        all_tsels_df["log([NII]/[Ha])"] = jnp.where(
+            jnp.logical_and(all_tsels_df["AGN_[NII]_6585.27_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
+            jnp.log10(all_tsels_df["AGN_[NII]_6585.27_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
+            jnp.nan
+        )
+
+        all_tsels_df["log([SII]/[Ha])"] = jnp.where(
+            jnp.logical_and(all_tsels_df["AGN_[SII]_6718.29_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
+            jnp.log10(all_tsels_df["AGN_[SII]_6718.29_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
+            jnp.nan
+        )
+
+        all_tsels_df["log([OI]/[Ha])"] = jnp.where(
+            jnp.logical_and(all_tsels_df["SF_[OI]_6302.046_REW"] > 0.0, all_tsels_df["Balmer_HI_6564.61_REW"] > 0.0),
+            jnp.log10(all_tsels_df["SF_[OI]_6302.046_REW"] / all_tsels_df["Balmer_HI_6564.61_REW"]),
+            jnp.nan
+        )
+
+        all_tsels_df["log([OIII]/[OII])"] = jnp.where(
+            jnp.logical_and(all_tsels_df["AGN_[OIII]_5008.24_REW"] > 0.0, all_tsels_df["SF_[OII]_3728.48_REW"] > 0),
+            jnp.log10(all_tsels_df["AGN_[OIII]_5008.24_REW"] / all_tsels_df["SF_[OII]_3728.48_REW"]),
+            jnp.nan
+        )
+
+        cat_nii = []
+        for x, y in zip(all_tsels_df["log([NII]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
+            if not (jnp.isfinite(x) and jnp.isfinite(y)):
+                cat_nii.append("NC")
+            elif y < Ka03_nii(x):
+                cat_nii.append("Star-forming")
+            elif y < Ke01_nii(x):
+                cat_nii.append("Composite")
+            else:
+                cat_nii.append("AGN")
+
+        all_tsels_df["CAT_NII"] = np.array(cat_nii)
+
+        cat_sii = []
+        for x, y in zip(all_tsels_df["log([SII]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
+            if not (jnp.isfinite(x) and jnp.isfinite(y)):
+                cat_sii.append("NC")
+            elif y < Ke01_sii(x):
+                cat_sii.append("Star-forming")
+            elif y < Ke06_sii(x):
+                cat_sii.append("LINER")
+            else:
+                cat_sii.append("Seyferts")
+
+        all_tsels_df["CAT_SII"] = np.array(cat_sii)
+
+        cat_oi = []
+        for x, y in zip(all_tsels_df["log([OI]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
+            if not (jnp.isfinite(x) and jnp.isfinite(y)):
+                cat_oi.append("NC")
+            elif y < Ke01_oi(x):
+                cat_oi.append("Star-forming")
+            elif y < Ke06_oi(x):
+                cat_oi.append("LINER")
+            else:
+                cat_oi.append("Seyferts")
+
+        all_tsels_df["CAT_OI"] = np.array(cat_oi)
+
+        cat_oii = []
+        for x, y in zip(all_tsels_df["log([OI]/[Ha])"], all_tsels_df["log([OIII]/[OII])"], strict=False):
+            if not (jnp.isfinite(x) and jnp.isfinite(y)):
+                cat_oii.append("NC")
+            elif y < lim_HII_comp(x):
+                cat_oii.append("SF / composite")
+            elif y < lim_seyf_liner(x):
+                cat_oii.append("LINER")
+            else:
+                cat_oii.append("Seyferts")
+
+        all_tsels_df["CAT_OIII/OIIvsOI"] = np.array(cat_oii)
+
+        return all_tsels_df
+
+
+    def plot_bpt_templates(self):
+        self._load_training()
+        all_tsels_df = self._bpt_classif()
+        cat_x_y = [
+            ("CAT_NII", "log([NII]/[Ha])", "log([OIII]/[Hb])"),
+            ("CAT_SII", "log([SII]/[Ha])", "log([OIII]/[Hb])"),
+            ("CAT_OI", "log([OI]/[Ha])", "log([OIII]/[Hb])"),
+            ("CAT_OIII/OIIvsOI", "log([OI]/[Ha])", "log([OIII]/[OII])")
+        ]
+        fig_list = []
+        for cat, x, y in cat_x_y:
+            f, a = plt.subplots(1, 1)
+            sns.scatterplot(
+                data=all_tsels_df,
+                x=x,
+                y=y,
+                hue=cat,
+                size='z_p',
+                sizes=(10, 100),
+                alpha=0.5,
+                ax=a
+            )
+
+            _x = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
+            if "NII" in cat:
+                a.plot(_x, Ka03_nii(_x), 'k-', lw=1)
+                a.plot(_x, Ke01_nii(_x), 'k-', lw=1)
+            elif "SII" in cat:
+                a.plot(_x, Ke01_sii(_x), 'k-', lw=1)
+                a.plot(_x, Ke06_sii(_x), 'k-', lw=1)
+            elif "OII" in cat:
+                a.plot(_x, lim_HII_comp(_x), 'k-', lw=1)
+                a.plot(_x, lim_seyf_liner(_x), 'k-', lw=1)
+            else:
+                a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
+                a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
+
+            fig_list.append(f)
+            plt.show()
+        return fig_list

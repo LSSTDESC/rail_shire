@@ -11,6 +11,8 @@ Created on Thu Aug 1 12:59:33 2024
 from functools import partial
 
 import jax
+import pandas as pd
+import numpy as np
 from jax import jit, vmap
 from jax.tree_util import tree_map
 from jax import numpy as jnp
@@ -32,7 +34,7 @@ except ImportError:
 
 from .met_weights_age_dep import calc_rest_sed_sfh_table_lognormal_mdf_agedep
 from .io_utils import istuple
-from .analysis import C_KMS, lsunPerHz_to_flam_noU
+from .analysis import C_KMS, lsunPerHz_to_flam_noU, _DUMMY_PARS
 from .filter import NUV_filt, NIR_filt
 
 jax.config.update("jax_enable_x64", True)
@@ -130,7 +132,7 @@ def mean_spectrum(wls, params, z_obs, ssp_data):
     :rtype: _type_
     """
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
 
     # interpolate with interpax which is differentiable
     # Fobs = jnp.interp(wls, ssp_data.ssp_wave, sed_attenuated)
@@ -139,7 +141,37 @@ def mean_spectrum(wls, params, z_obs, ssp_data):
     return Fobs
 
 
-vmap_mean_spectrum = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
+vmap_mean_spectrum_zo = vmap(mean_spectrum, in_axes=(None, None, 0, None))
+vmap_mean_spectrum = vmap(vmap_mean_spectrum_zo, in_axes=(None, 0, None, None))
+
+
+@jit
+def mean_spectrum_nodust(wls, params, z_obs, ssp_data):
+    """mean_spectrum_nodust _summary_
+
+    :param wls: _description_
+    :type wls: _type_
+    :param params: _description_
+    :type params: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    # get the restframe spectra without and with dust attenuation
+    ssp_wave, rest_sed, _ = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+
+    # interpolate with interpax which is differentiable
+    # Fobs = jnp.interp(wls, ssp_data.ssp_wave, sed_attenuated)
+    Fobs = interp1d(wls, ssp_wave, rest_sed, method="akima", extrap=False)
+
+    return Fobs
+
+
+vmap_mean_spectrum_nodust_zo = vmap(mean_spectrum_nodust, in_axes=(None, None, 0, None))
+vmap_mean_spectrum_nodust = vmap(vmap_mean_spectrum_nodust_zo, in_axes=(None, 0, None, None))
 
 
 @partial(vmap, in_axes=(None, None, None, 0, None))
@@ -299,6 +331,7 @@ def calc_eqw(sur_wls, sur_spec, lin):
 
 
 vmap_calc_eqw = vmap(calc_eqw, in_axes=(None, None, 0))
+vmap_eqw_sed = vmap(vmap_calc_eqw, in_axes=(None, 0, None))
 
 
 @jit
@@ -429,6 +462,15 @@ def get_colors_templates(params, wls, z_obs, transm_arr, ssp_data):
 
 vmap_cols_zo = vmap(get_colors_templates, in_axes=(None, None, 0, None, None))
 vmap_cols_templ = vmap(vmap_cols_zo, in_axes=(0, None, None, None, None))
+
+
+def get_colors_templates_nodust(params, wls, z_obs, transm_arr, ssp_data):
+    ssp_wave, sed, _ = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed, wls, transm_arr, z_obs)
+    return _mags[:-1]-_mags[1:]
+
+vmap_cols_zo_nodust = vmap(get_colors_templates_nodust, in_axes=(None, None, 0, None, None))
+vmap_cols_templ_nodust = vmap(vmap_cols_zo_nodust, in_axes=(0, None, None, None, None))
 
 def make_sps_templates(params_arr, wls, transm_arr, redz_arr, av_arr, ssp_data):
     """make_sps_templates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
@@ -649,3 +691,351 @@ def make_legacy_itemplates(params_arr, zref_arr, wls, transm_arr, redz_arr, av_a
     reslist_of_tupl = tree_map(lambda partup: vmap_iclrs_zobs_legacy(jnp.array(partup[:-1]), partup[-1], wls, transm_arr, redz_arr, av_arr, ssp_data, id_imag), templ_tupl, is_leaf=istuple)
     # colors, nuvk = vmap_iclrs_pars_legacy(params_arr, zref_arr, wls, transm_arr, redz_arr, av_arr, ssp_data, id_imag)
     return reslist_of_tupl
+
+def lim_HII_comp(log_oi_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII et composites : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right) < \
+    −1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163$
+    - LINERs : $−1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right) < \\log \\left(\frac{\\left[O_I\right]}{H_\alpha} \right) + 0.7$
+    - Seyferts : $−1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right)$ et $\\log \\left(\frac{\\left[O_I\right]}{H_\alpha} \right) + 0.7 <\
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right)$
+
+    Parameters
+    ----------
+    log_oi_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [OI] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII and Composites vs.
+        Seyferts and LINERs.
+    """
+    return -1.701 * log_oi_ha - 2.163
+
+
+def lim_seyf_liner(log_oi_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII et composites : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right) < \
+    −1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163$
+    - LINERs : $−1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right) < \\log \\left(\frac{\\left[O_I\right]}{H_\alpha} \right) + 0.7$
+    - Seyferts : $−1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right)$ et $\\log \\left(\frac{\\left[O_I\right]}{H_\alpha} \right) + 0.7 <\
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right)$
+
+    Parameters
+    ----------
+    log_oi_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [OI] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : LINERs vs. Seyferts.
+    """
+    return 1.0 * log_oi_ha + 0.7
+
+
+def Ka03_nii(log_nii_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.05} + 1.3$ (Ka03)
+    - Composites : (Ka03) $\frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.05} + 1.3 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.47} + 1.19$ (Ke01)
+
+    Parameters
+    ----------
+    log_nii_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [NII] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII vs. Composites,
+        Seyferts and LINERs.
+    """
+    return 0.61 / (log_nii_ha - 0.05) + 1.3
+
+
+def Ke01_nii(log_nii_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.05} + 1.3$ (Ka03)
+    - Composites : (Ka03) $\frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.05} + 1.3 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.47} + 1.19$ (Ke01)
+
+    Parameters
+    ----------
+    log_nii_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [NII] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII and Composites vs.
+        Seyferts and LINERs.
+    """
+    return 0.61 / (log_nii_ha - 0.47) + 1.19
+
+
+def Ke01_sii(log_sii_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30$ (Ke01)
+    - Seyfert : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    (Kw06) $1.89 \\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) + 0.76 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$
+    - LINER : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) > \
+    1.89 \\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) + 0.76$ (Ke06)
+
+    Parameters
+    ----------
+    log_sii_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [SII] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII vs. Seyferts and LINERs.
+    """
+    return 0.72 / (log_sii_ha - 0.32) + 1.30
+
+
+def Ke06_sii(log_sii_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30$ (Ke01)
+    - Seyfert : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    (Kw06) $1.89 \\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) + 0.76 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$
+    - LINER : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) > \
+    1.89 \\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) + 0.76$ (Ke06)
+
+    Parameters
+    ----------
+    log_sii_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [SII] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : LINERs vs. Seyferts.
+    """
+    return 1.89 * log_sii_ha + 0.76
+
+
+def Ke01_oi(log_oi_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \frac{0.73}{\\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 0.59} + 1.33$ (Ke01)
+    - Seyfert : (Ke01) $\frac{0.73}{\\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 0.59} + 1.33 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    (Kw06) $1.18 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$
+    - LINER : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) > \
+    1.18 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 1.30$ (Ke06)
+
+    Parameters
+    ----------
+    log_oi_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [OI] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII vs. Seyferts + LINERs.
+    """
+    return 0.73 / (log_oi_ha + 0.59) + 1.33
+
+
+def Ke06_oi(log_oi_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) <\
+    \frac{0.73}{\\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 0.59} + 1.33$ (Ke01)
+    - Seyfert : (Ke01) $\frac{0.73}{\\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 0.59} + 1.33 <\
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    Kw06) $1.18 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$
+    - LINER : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) > \
+    1.18 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 1.30$ (Ke06)
+
+    Parameters
+    ----------
+    log_oi_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [OI] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : LINERs vs. Seyferts.
+    """
+    return 1.18 * log_oi_ha + 1.30
+
+@jit
+def bpt_rews_pars_zo(templ_pars, zobs, ssp_data):
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_seds_zo = vmap_mean_spectrum_nodust_zo(_wls, templ_pars, zobs, ssp_data)
+    rews_zo = vmap_eqw_sed(_wls, templ_seds_zo, _lines_wl)
+    return rews_zo
+
+vmap_bpt_rews = vmap(bpt_rews_pars_zo, in_axes=(0, None, None))
+
+@jit
+def bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data):
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_seds_zo = vmap_mean_spectrum_zo(_wls, templ_pars, zobs, ssp_data)
+    rews_zo = vmap_eqw_sed(_wls, templ_seds_zo, _lines_wl)
+    return rews_zo
+
+vmap_bpt_rews_dusty = vmap(bpt_rews_pars_zo_dusty, in_axes=(0, None, None))
+
+def colrs_bptrews_templ_zo(templ_pars, wls, zobs, transm_arr, ssp_data):
+    t_rews = bpt_rews_pars_zo(templ_pars, zobs, ssp_data)
+    t_colors = vmap_cols_zo_nodust(templ_pars, wls, zobs, transm_arr, ssp_data)
+    return jnp.column_stack((t_colors, t_rews))
+
+vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
+
+def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
+    t_rews = bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data)
+    t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
+    return jnp.column_stack((t_colors, t_rews))
+
+vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
+
+
+def bpt_classif(templ_df, ssp_data, zkey='redshift', dusty=False):
+    """bpt_classif Use Restframe Equivalent Widths to provide an rudimentary classification of galaxies, using BPT diagrams as described in
+    [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract).
+
+    :param templ_df: _description_
+    :type templ_df: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :param zkey: _description_, defaults to 'redshift'
+    :type zkey: str, optional
+    :param dusty: _description_, defaults to False
+    :type dusty: bool, optional
+    :return: _description_
+    :rtype: _type_
+    """
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+
+    templ_pars = jnp.array(templ_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+    zref = jnp.array(templ_df[zkey])
+
+    all_seds = vmap_mean_spectrum(_wls, templ_pars, zref, ssp_data) if dusty else vmap_mean_spectrum_nodust(_wls, templ_pars, zref, ssp_data)
+    all_REWs = vmap_eqw_sed(_wls, all_seds, _lines_wl)
+    _lines_df = pd.DataFrame(
+        index=templ_df.index,
+        columns=[
+            "SF_[OII]_3728.48_REW",
+            "Balmer_HI_4862.68_REW",
+            "AGN_[OIII]_5008.24_REW",
+            "SF_[OI]_6302.046_REW",
+            "Balmer_HI_6564.61_REW",
+            "AGN_[NII]_6585.27_REW",
+            "AGN_[SII]_6718.29_REW"
+        ],
+        data=all_REWs
+    )
+    lines_df = templ_df.join(_lines_df)
+
+    lines_df["log([OIII]/[Hb])"] = jnp.where(
+        jnp.logical_and(lines_df["AGN_[OIII]_5008.24_REW"] > 0.0, lines_df["Balmer_HI_4862.68_REW"] > 0.0), jnp.log10(lines_df["AGN_[OIII]_5008.24_REW"] / lines_df["Balmer_HI_4862.68_REW"]), jnp.nan
+    )
+
+    lines_df["log([NII]/[Ha])"] = jnp.where(
+        jnp.logical_and(lines_df["AGN_[NII]_6585.27_REW"] > 0.0, lines_df["Balmer_HI_6564.61_REW"] > 0.0), jnp.log10(lines_df["AGN_[NII]_6585.27_REW"] / lines_df["Balmer_HI_6564.61_REW"]), jnp.nan
+    )
+
+    lines_df["log([SII]/[Ha])"] = jnp.where(
+        jnp.logical_and(lines_df["AGN_[SII]_6718.29_REW"] > 0.0, lines_df["Balmer_HI_6564.61_REW"] > 0.0), jnp.log10(lines_df["AGN_[SII]_6718.29_REW"] / lines_df["Balmer_HI_6564.61_REW"]), jnp.nan
+    )
+
+    lines_df["log([OI]/[Ha])"] = jnp.where(
+        jnp.logical_and(lines_df["SF_[OI]_6302.046_REW"] > 0.0, lines_df["Balmer_HI_6564.61_REW"] > 0.0), jnp.log10(lines_df["SF_[OI]_6302.046_REW"] / lines_df["Balmer_HI_6564.61_REW"]), jnp.nan
+    )
+
+    lines_df["log([OIII]/[OII])"] = jnp.where(
+        jnp.logical_and(lines_df["AGN_[OIII]_5008.24_REW"] > 0.0, lines_df["SF_[OII]_3728.48_REW"] > 0), jnp.log10(lines_df["AGN_[OIII]_5008.24_REW"] / lines_df["SF_[OII]_3728.48_REW"]), jnp.nan
+    )
+
+    cat_nii = []
+    for x, y in zip(lines_df["log([NII]/[Ha])"], lines_df["log([OIII]/[Hb])"], strict=False):
+        if not (jnp.isfinite(x) and jnp.isfinite(y)):
+            cat_nii.append("NC")
+        elif y < Ka03_nii(x):
+            cat_nii.append("Star-forming")
+        elif y < Ke01_nii(x):
+            cat_nii.append("Composite")
+        else:
+            cat_nii.append("AGN")
+
+    lines_df["CAT_NII"] = np.array(cat_nii)
+
+    cat_sii = []
+    for x, y in zip(lines_df["log([SII]/[Ha])"], lines_df["log([OIII]/[Hb])"], strict=False):
+        if not (jnp.isfinite(x) and jnp.isfinite(y)):
+            cat_sii.append("NC")
+        elif y < Ke01_sii(x):
+            cat_sii.append("Star-forming")
+        elif y < Ke06_sii(x):
+            cat_sii.append("LINER")
+        else:
+            cat_sii.append("Seyferts")
+
+    lines_df["CAT_SII"] = np.array(cat_sii)
+
+    cat_oi = []
+    for x, y in zip(lines_df["log([OI]/[Ha])"], lines_df["log([OIII]/[Hb])"], strict=False):
+        if not (jnp.isfinite(x) and jnp.isfinite(y)):
+            cat_oi.append("NC")
+        elif y < Ke01_oi(x):
+            cat_oi.append("Star-forming")
+        elif y < Ke06_oi(x):
+            cat_oi.append("LINER")
+        else:
+            cat_oi.append("Seyferts")
+
+    lines_df["CAT_OI"] = np.array(cat_oi)
+
+    cat_oii = []
+    for x, y in zip(lines_df["log([OI]/[Ha])"], lines_df["log([OIII]/[OII])"], strict=False):
+        if not (jnp.isfinite(x) and jnp.isfinite(y)):
+            cat_oii.append("NC")
+        elif y < lim_HII_comp(x):
+            cat_oii.append("SF / composite")
+        elif y < lim_seyf_liner(x):
+            cat_oii.append("LINER")
+        else:
+            cat_oii.append("Seyferts")
+
+    lines_df["CAT_OIII/OIIvsOI"] = np.array(cat_oii)
+
+    return lines_df

@@ -88,7 +88,8 @@ disable = [
     "not-callable",
     "trailing-whitespace",
     "too-many-instance-attributes",
-    "relative-beyond-top-level"
+    "relative-beyond-top-level",
+    "too-many-lines"
 ]
 max-line-length = 200
 max-locals = 100
