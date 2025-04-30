@@ -5,13 +5,6 @@ from jax import numpy as jnp
 #from jax import vmap, jit
 from jax.tree_util import tree_map
 #from jax import random as jrn
-try:
-    from jax.numpy import trapezoid
-except ImportError:
-    try:
-        from jax.scipy.integrate import trapezoid
-    except ImportError:
-        from jax.numpy import trapz as trapezoid
 
 import pandas as pd
 #import qp
@@ -747,7 +740,7 @@ class ShireInformer(CatInformer):
             0.001
         )
         _selnorm = jnp.logical_and(wls>3950, wls<4000)
-        norms = trapezoid(restframe_fnus[:, :, _selnorm], x=wls[_selnorm], axis=2)
+        norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
         restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
         rbmap = mpl.colormaps['coolwarm']
@@ -771,10 +764,10 @@ class ShireInformer(CatInformer):
             aa.set_ylabel(r'Filter transmission / effective area) [- / $\mathrm{m^2}$)]')
             #a.set_xscale('log')
             a.set_yscale('log')
+            a.set_xlim(1000.0/(1+z), 25000.0/(1+z))
             a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
             secax = a.secondary_xaxis('top', functions=(lambda wl: wl*(1+z), lambda wl: wl/(1+z)))
             secax.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
-            secax.set_xlim(1000.0, 25000.0)
             figlist.append(f)
             plt.show()
         return figlist
@@ -803,8 +796,8 @@ class ShireInformer(CatInformer):
             "AGN_[NII]_6585.27_REW",
             "AGN_[SII]_6718.29_REW"
         ]
-        line_wids = lines * 600 / C_KMS / 2
-        cont_wids = lines * 2000 / C_KMS / 2
+        line_wids = lines * 400 / C_KMS / 2
+        cont_wids = lines * 1000 / C_KMS / 2
 
         sspdata = load_ssp(
             os.path.abspath(
