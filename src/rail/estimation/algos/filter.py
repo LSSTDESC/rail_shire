@@ -44,8 +44,8 @@ D4000b_filt = sedpyFilter(96, _wlsd4k, d4b_transm)
 
 # D4000r
 d4r_transm = np.zeros_like(_wlsd4k)
-d4b_transm[(_wlsd4k >= 4000.0) * (_wlsd4k <= 4100.0)] = 1.0
-D4000r_filt = sedpyFilter(97, _wlsd4k, nir_transm)
+d4r_transm[(_wlsd4k >= 4000.0) * (_wlsd4k <= 4100.0)] = 1.0
+D4000r_filt = sedpyFilter(97, _wlsd4k, d4r_transm)
 
 
 def get_2lists(filter_list):

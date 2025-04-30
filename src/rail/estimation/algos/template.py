@@ -320,8 +320,8 @@ def calc_eqw(sur_wls, sur_spec, lin):
     float
         Value of the nequivalent width of spectral line at $\lambda=$`lin`.
     """
-    line_wid = lin * 500 / C_KMS / 2
-    cont_wid = lin * 1500 / C_KMS / 2
+    line_wid = lin * 600 / C_KMS / 2
+    cont_wid = lin * 2000 / C_KMS / 2
     sur_flam = lsunPerHz_to_flam_noU(sur_wls, sur_spec, 0.001)
     nancont = jnp.where(jnp.logical_or(jnp.logical_and(sur_wls > lin - cont_wid, sur_wls < lin - line_wid), jnp.logical_and(sur_wls > lin + line_wid, sur_wls < lin + cont_wid)), sur_flam, jnp.nan)
     height = jnp.nanmean(nancont)
@@ -462,6 +462,36 @@ v_nuvk = vmap(v_nuvk_zo, in_axes=(0, None, None, None))
 
 
 @jit
+def calc_nuvk_dusty(pars_arr, wls, z_obs, ssp_data):
+    """calc_nuvk_dusty _summary_
+
+    :param pars_arr: _description_
+    :type pars_arr: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    sed = mean_spectrum(wls, pars_arr, z_obs, ssp_data)
+    _nuvk = jnp.array(
+        [
+            calc_rest_mag(wls, sed, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(wls, sed, NIR_filt.wavelength, NIR_filt.transmission)
+        ]
+    )
+
+    return _nuvk[0]-_nuvk[1]
+
+
+v_nuvk_zo_dusty = vmap(calc_nuvk_dusty, in_axes=(None, None, 0, None))
+v_nuvk_dusty = vmap(v_nuvk_zo_dusty, in_axes=(0, None, None, None))
+
+
+@jit
 def calc_d4000n(pars_arr, wls, z_obs, ssp_data):
     """calc_d4000n _summary_
 
@@ -489,6 +519,36 @@ def calc_d4000n(pars_arr, wls, z_obs, ssp_data):
 
 v_d4000n_zo = vmap(calc_d4000n, in_axes=(None, None, 0, None))
 v_d4000n = vmap(v_d4000n_zo, in_axes=(0, None, None, None))
+
+
+@jit
+def calc_d4000n_dusty(pars_arr, wls, z_obs, ssp_data):
+    """calc_d4000n_dusty _summary_
+
+    :param pars_arr: _description_
+    :type pars_arr: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    sed = mean_spectrum(wls, pars_arr, z_obs, ssp_data)
+    d4000 = jnp.array(
+        [
+            calc_rest_mag(wls, sed, D4000b_filt.wavelength, D4000b_filt.transmission),
+            calc_rest_mag(wls, sed, D4000r_filt.wavelength, D4000r_filt.transmission)
+        ]
+    )
+
+    return d4000[0]-d4000[1]
+
+
+v_d4000n_zo_dusty = vmap(calc_d4000n_dusty, in_axes=(None, None, 0, None))
+v_d4000n_dusty = vmap(v_d4000n_zo_dusty, in_axes=(0, None, None, None))
 
 
 def get_colors_templates(params, wls, z_obs, transm_arr, ssp_data):
@@ -951,18 +1011,19 @@ vmap_bpt_rews_dusty = vmap(bpt_rews_pars_zo_dusty, in_axes=(0, None, None))
 
 def colrs_bptrews_templ_zo(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo(templ_pars, zobs, ssp_data)
-    t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
-    t_nuvk = v_nuvk_zo(wls, templ_pars, zobs, ssp_data)
-    t_d400n = v_d4000n_zo(wls, templ_pars, zobs, ssp_data)
-    return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d400n))
+    t_colors = vmap_cols_zo_nodust(templ_pars, wls, zobs, transm_arr, ssp_data)
+    t_nuvk = v_nuvk_zo(templ_pars, wls, zobs, ssp_data)
+    t_d4000n = v_d4000n_zo(templ_pars, wls, zobs, ssp_data)
+    return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d4000n))
 
 vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
 
 def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
-    t_nuvk = v_nuvk_zo(wls, templ_pars, zobs, ssp_data)
-    return jnp.column_stack((t_colors, t_rews, t_nuvk))
+    t_nuvk = v_nuvk_zo_dusty(templ_pars, wls, zobs, ssp_data)
+    t_d4000n = v_d4000n_zo_dusty(templ_pars, wls, zobs, ssp_data)
+    return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d4000n))
 
 vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
 

@@ -672,7 +672,6 @@ class ShireInformer(CatInformer):
 
 
     def plot_bpt_templates(self):
-        self._load_training()
         all_tsels_df = self._bpt_classif()
         cat_x_y = [
             ("CAT_NII", "log([NII]/[Ha])", "log([OIII]/[Hb])"),
@@ -682,36 +681,37 @@ class ShireInformer(CatInformer):
         ]
         fig_list = []
         for cat, x, y in cat_x_y:
-            f, a = plt.subplots(1, 1)
-            sns.scatterplot(
-                data=all_tsels_df,
-                x=x,
-                y=y,
-                hue=cat,
-                size='z_p',
-                sizes=(10, 100),
-                alpha=0.5,
-                ax=a
-            )
+            if np.any(np.isfinite(all_tsels_df[x])) and np.any(np.isfinite(all_tsels_df[y])):
+                f, a = plt.subplots(1, 1)
+                sns.scatterplot(
+                    data=all_tsels_df,
+                    x=x,
+                    y=y,
+                    hue=cat,
+                    size='z_p',
+                    sizes=(10, 100),
+                    alpha=0.5,
+                    ax=a
+                )
 
-            _x = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
-            if "NII" in cat:
-                a.plot(_x, Ka03_nii(_x), 'k-', lw=1)
-                a.plot(_x, Ke01_nii(_x), 'k-', lw=1)
-                a.set_xlim(np.nanmin(all_tsels_df[x]), 0.0)
-            elif "SII" in cat:
-                a.plot(_x, Ke01_sii(_x), 'k-', lw=1)
-                a.plot(_x, Ke06_sii(_x), 'k-', lw=1)
-            elif "OII" in cat:
-                a.plot(_x, lim_HII_comp(_x), 'k-', lw=1)
-                a.plot(_x, lim_seyf_liner(_x), 'k-', lw=1)
-            else:
-                a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
-                a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
-            
-            #a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
-            fig_list.append(f)
-            plt.show()
+                _x = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
+                if "NII" in cat:
+                    a.plot(_x, Ka03_nii(_x), 'k-', lw=1)
+                    a.plot(_x, Ke01_nii(_x), 'k-', lw=1)
+                    a.set_xlim(np.nanmin(all_tsels_df[x]), 0.0)
+                elif "SII" in cat:
+                    a.plot(_x, Ke01_sii(_x), 'k-', lw=1)
+                    a.plot(_x, Ke06_sii(_x), 'k-', lw=1)
+                elif "OII" in cat:
+                    a.plot(_x, lim_HII_comp(_x), 'k-', lw=1)
+                    a.plot(_x, lim_seyf_liner(_x), 'k-', lw=1)
+                else:
+                    a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
+                    a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
+                
+                #a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
+                fig_list.append(f)
+                plt.show()
         return fig_list
 
     def plot_templ_seds(self, redshifts=None):
@@ -739,22 +739,28 @@ class ShireInformer(CatInformer):
             0.001
         )
         d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
-        rbmap = mpl.colormaps['rainbow']
+        rbmap = mpl.colormaps['coolwarm']
         cNorm = mpl.colors.Normalize(vmin=d4000n.min(), vmax=d4000n.max())
         d4map = mpl.cm.ScalarMappable(norm=cNorm, cmap=rbmap)
         d4cols = d4map.to_rgba(d4000n)
+        print(restframe_fnus.shape, d4000n.shape, wls.shape, d4cols.shape)
         filtcols = plt.cm.rainbow(np.linspace(0, 1, transm_arr.shape[0]))
         figlist = []
         for iz, z in enumerate(redshifts):
             f, a = plt.subplots(1,1, figsize=(7, 4), constrained_layout=True)
-            a.plot(wls, restframe_fnus[:, iz, :].T, c=d4cols[:, iz])
+            for fnu, col in zip(restframe_fnus[:, iz, :], d4cols[:, iz, :], strict=True):
+                a.plot(wls, fnu, c=tuple(col))
             plt.colorbar(d4map, ax=a, label='D4000')
             a.set_xlabel(r'Restframe wavelength $\mathrm{[\AA]}$')
             a.set_ylabel(r'Spectral Energy Density $\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
-            aa = a.twiny()
-            aa.plot(wls/(1+z), transm_arr.T, c=filtcols, lw=1)
-            aa.fill_between(wls/(1+z), transm_arr.T, alpha=0.3, c=filtcols, lw=1)
+            aa = a.twinx()
+            for trans, fcol in zip(transm_arr, filtcols, strict=True):
+                aa.plot(wls/(1+z), trans, c=tuple(fcol), lw=1)
+                aa.fill_between(wls/(1+z), trans, alpha=0.3, color=tuple(fcol), lw=1)
             aa.set_ylabel(r'Filter transmission (resp. effective area) [- (resp. $\mathrm{m^2}$)]$')
+            a.set_xscale('log')
+            a.set_yscale('log')
+            a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
             secax = a.secondary_xaxis('top', functions=(lambda wl: wl*(1+z), lambda wl: wl/(1+z)))
             secax.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
             figlist.append(f)
@@ -773,8 +779,8 @@ class ShireInformer(CatInformer):
                     print("Specified index not found in the templates dataframe.")
             else:
                 print("Specified key not found in the templates dataframe's index.")
-        pars = subdf[_DUMMY_PARS.PARAM_NAMES_FLAT]
-        z = subdf[self.config.redshift_col].values if redshift is None else redshift
+        pars = jnp.array(subdf[_DUMMY_PARS.PARAM_NAMES_FLAT].values, dtype=jnp.float64)
+        z = subdf.iloc[0, self.config.redshift_col] if redshift is None else redshift
         lines = jnp.array([3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29])
         lines_names = [
             "SF_[OII]_3728.48_REW",
@@ -785,8 +791,8 @@ class ShireInformer(CatInformer):
             "AGN_[NII]_6585.27_REW",
             "AGN_[SII]_6718.29_REW"
         ]
-        line_wids = lines * 500 / C_KMS / 2
-        cont_wids = lines * 1500 / C_KMS / 2
+        line_wids = lines * 600 / C_KMS / 2
+        cont_wids = lines * 2000 / C_KMS / 2
 
         sspdata = load_ssp(
             os.path.abspath(
@@ -799,21 +805,22 @@ class ShireInformer(CatInformer):
         )
 
         wls = jnp.arange(3500., 7000., 0.1)
-        sed = mean_spectrum_nodust(pars, wls, z, sspdata)
+        sed = mean_spectrum_nodust(wls, pars, z, sspdata)
         eqws = vmap_calc_eqw(wls, sed, lines)
         fnu = lsunPerHz_to_fnu_noU(sed, 0.001)
 
         for il, lin in enumerate(lines):
             f, a = plt.subplots(1,1)
             sel = jnp.logical_and(wls>=lin-3*cont_wids[il], wls<=lin+3*cont_wids[il])
-            a.plot(wls[sel], fnu[sel], fmt='-k', label=subdf['name'])
-            a.axvline(lin-cont_wids[il], fmt=':o')
-            a.axvline(lin+cont_wids[il], fmt=':o')
-            a.axvline(lin-line_wids[il], fmt=':r')
-            a.axvline(lin+line_wids[il], fmt=':r')
-            a.axvline(lin, fmt='-g', label=lines_names[il])
-            a.fill_betweenx(fnu[sel], x1=lin-eqws[il], x2=lin+eqws[il], color='g', alpha=0.5, label='REW')
+            a.plot(wls[sel], fnu[sel], ls='-', color='k', label=subdf['name'])
+            a.axvline(lin-cont_wids[il], ls=':', color='o')
+            a.axvline(lin+cont_wids[il], ls=':', color='o')
+            a.axvline(lin-line_wids[il], ls=':', color='r')
+            a.axvline(lin+line_wids[il], ls=':', color='r')
+            a.axvline(lin, ls='-', color='g', label=lines_names[il])
+            a.fill_betweenx(fnu[sel], x1=lin-0.5*eqws[il], x2=lin+0.5*eqws[il], color='g', alpha=0.5, label='REW')
             a.legend()
+            a.set_title(f"Restframe Equivalent Width of {lines_names[il]} for template {subdf['name']} at "+r"$z=$"+f"{z:.2f}")
             plt.show()
             f.append(figlist)
         
