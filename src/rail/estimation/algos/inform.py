@@ -18,11 +18,27 @@ from rail.core.common_params import SHARED_PARAMS
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
+import matplotlib as mpl
 import seaborn as sns
 
 from .io_utils import load_ssp, istuple, SHIREDATALOC
-from .analysis import _DUMMY_PARS #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
-from .template import vmap_cols_zo, colrs_bptrews_templ_zo, lim_HII_comp, lim_seyf_liner, Ka03_nii, Ke01_nii, Ke01_oi, Ke01_sii, Ke06_oi, Ke06_sii
+from .analysis import _DUMMY_PARS, lsunPerHz_to_fnu_noU, C_KMS #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
+from .template import (
+    vmap_cols_zo,
+    colrs_bptrews_templ_zo,
+    lim_HII_comp,
+    lim_seyf_liner,
+    Ka03_nii,
+    Ke01_nii,
+    Ke01_oi,
+    Ke01_sii,
+    Ke06_oi,
+    Ke06_sii,
+    vmap_mean_spectrum_nodust,
+    v_d4000n,
+    mean_spectrum_nodust,
+    vmap_calc_eqw
+)
 from .filter import get_sedpy
 from .cosmology import prior_mod
 
@@ -697,3 +713,108 @@ class ShireInformer(CatInformer):
             fig_list.append(f)
             plt.show()
         return fig_list
+
+    def plot_templ_seds(self, redshifts=None):
+        if redshifts is None:
+            redshifts = jnp.linspace(self.config.zmin, self.config.zmax, 6, endpoint=True)
+        elif isinstance(redshifts, (int, float, jnp.float32, jnp.float64, np.float32, np.float64)):
+            redshifts = jnp.array([redshifts])
+        elif isinstance(redshifts, (list, tuple, np.ndarray)):
+            redshifts = jnp.array(redshifts)
+        else:
+            assert isinstance(redshifts, jnp.ndarray), "Please specify the redshift as a single value or a list, tuple, numpy array or jax array of values."
+        wls, transm_arr = self._load_filters()
+        templ_pars = jnp.array(self.templates_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+        sspdata = load_ssp(
+            os.path.abspath(
+                os.path.join(
+                    self.data_path,
+                    "SSP",
+                    self.config.ssp_file
+                )
+            )
+        )
+        restframe_fnus = lsunPerHz_to_fnu_noU(
+            vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
+            0.001
+        )
+        d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
+        rbmap = mpl.colormaps['rainbow']
+        cNorm = mpl.colors.Normalize(vmin=d4000n.min(), vmax=d4000n.max())
+        d4map = mpl.cm.ScalarMappable(norm=cNorm, cmap=rbmap)
+        d4cols = d4map.to_rgba(d4000n)
+        filtcols = plt.cm.rainbow(np.linspace(0, 1, transm_arr.shape[0]))
+        figlist = []
+        for iz, z in enumerate(redshifts):
+            f, a = plt.subplots(1,1, figsize=(7, 4), constrained_layout=True)
+            a.plot(wls, restframe_fnus[:, iz, :].T, c=d4cols[:, iz])
+            plt.colorbar(d4map, ax=a, label='D4000')
+            a.set_xlabel(r'Restframe wavelength $\mathrm{[\AA]}$')
+            a.set_ylabel(r'Spectral Energy Density $\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
+            aa = a.twiny()
+            aa.plot(wls/(1+z), transm_arr.T, c=filtcols, lw=1)
+            aa.fill_between(wls/(1+z), transm_arr.T, alpha=0.3, c=filtcols, lw=1)
+            aa.set_ylabel(r'Filter transmission (resp. effective area) [- (resp. $\mathrm{m^2}$)]$')
+            secax = a.secondary_xaxis('top', functions=(lambda wl: wl*(1+z), lambda wl: wl/(1+z)))
+            secax.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
+            figlist.append(f)
+            plt.show()
+        return figlist
+
+    def plot_line_sed(self, templ_id, redshift=None):
+        figlist = []
+        try:
+            subdf = self.templates_df.loc[templ_id]
+        except KeyError:
+            if isinstance(templ_id, int):
+                try:
+                    subdf = self.templates_df.iloc[templ_id]
+                except IndexError:
+                    print("Specified index not found in the templates dataframe.")
+            else:
+                print("Specified key not found in the templates dataframe's index.")
+        pars = subdf[_DUMMY_PARS.PARAM_NAMES_FLAT]
+        z = subdf[self.config.redshift_col].values if redshift is None else redshift
+        lines = jnp.array([3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29])
+        lines_names = [
+            "SF_[OII]_3728.48_REW",
+            "Balmer_HI_4862.68_REW",
+            "AGN_[OIII]_5008.24_REW",
+            "SF_[OI]_6302.046_REW",
+            "Balmer_HI_6564.61_REW",
+            "AGN_[NII]_6585.27_REW",
+            "AGN_[SII]_6718.29_REW"
+        ]
+        line_wids = lines * 500 / C_KMS / 2
+        cont_wids = lines * 1500 / C_KMS / 2
+
+        sspdata = load_ssp(
+            os.path.abspath(
+                os.path.join(
+                    self.data_path,
+                    "SSP",
+                    self.config.ssp_file
+                )
+            )
+        )
+
+        wls = jnp.arange(3500., 7000., 0.1)
+        sed = mean_spectrum_nodust(pars, wls, z, sspdata)
+        eqws = vmap_calc_eqw(wls, sed, lines)
+        fnu = lsunPerHz_to_fnu_noU(sed, 0.001)
+
+        for il, lin in enumerate(lines):
+            f, a = plt.subplots(1,1)
+            sel = jnp.logical_and(wls>=lin-3*cont_wids[il], wls<=lin+3*cont_wids[il])
+            a.plot(wls[sel], fnu[sel], fmt='-k', label=subdf['name'])
+            a.axvline(lin-cont_wids[il], fmt=':o')
+            a.axvline(lin+cont_wids[il], fmt=':o')
+            a.axvline(lin-line_wids[il], fmt=':r')
+            a.axvline(lin+line_wids[il], fmt=':r')
+            a.axvline(lin, fmt='-g', label=lines_names[il])
+            a.fill_betweenx(fnu[sel], x1=lin-eqws[il], x2=lin+eqws[il], color='g', alpha=0.5, label='REW')
+            a.legend()
+            plt.show()
+            f.append(figlist)
+        
+        return figlist

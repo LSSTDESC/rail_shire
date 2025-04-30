@@ -89,7 +89,8 @@ disable = [
     "trailing-whitespace",
     "too-many-instance-attributes",
     "relative-beyond-top-level",
-    "too-many-lines"
+    "too-many-lines",
+    "cell-var-from-loop"
 ]
 max-line-length = 200
 max-locals = 100
