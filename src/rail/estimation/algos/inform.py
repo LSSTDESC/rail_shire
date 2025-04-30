@@ -243,7 +243,7 @@ class ShireInformer(CatInformer):
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_df.iterrows()):
             _colrrews = templ_tupl_sps[it]
-            _df = pd.DataFrame(columns=color_names+['NUVK']+lines_names, data=_colrrews)
+            _df = pd.DataFrame(columns=color_names+['NUVK', 'D4000n']+lines_names, data=_colrrews)
             _df['z_p'] = pzs
             _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
             _df['name'] = np.full(pzs.shape, tname)

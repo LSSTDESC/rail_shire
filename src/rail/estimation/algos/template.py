@@ -35,7 +35,7 @@ except ImportError:
 from .met_weights_age_dep import calc_rest_sed_sfh_table_lognormal_mdf_agedep
 from .io_utils import istuple
 from .analysis import C_KMS, lsunPerHz_to_flam_noU, _DUMMY_PARS
-from .filter import NUV_filt, NIR_filt
+from .filter import NUV_filt, NIR_filt, D4000b_filt, D4000r_filt
 
 jax.config.update("jax_enable_x64", True)
 
@@ -446,11 +446,11 @@ def calc_nuvk(pars_arr, wls, z_obs, ssp_data):
     :return: _description_
     :rtype: _type_
     """
-    sed_attenuated = mean_spectrum(wls, pars_arr, z_obs, ssp_data)
+    sed = mean_spectrum_nodust(wls, pars_arr, z_obs, ssp_data)
     _nuvk = jnp.array(
         [
-            calc_rest_mag(wls, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
-            calc_rest_mag(wls, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
+            calc_rest_mag(wls, sed, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(wls, sed, NIR_filt.wavelength, NIR_filt.transmission)
         ]
     )
 
@@ -459,6 +459,36 @@ def calc_nuvk(pars_arr, wls, z_obs, ssp_data):
 
 v_nuvk_zo = vmap(calc_nuvk, in_axes=(None, None, 0, None))
 v_nuvk = vmap(v_nuvk_zo, in_axes=(0, None, None, None))
+
+
+@jit
+def calc_d4000n(pars_arr, wls, z_obs, ssp_data):
+    """calc_d4000n _summary_
+
+    :param pars_arr: _description_
+    :type pars_arr: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    sed = mean_spectrum_nodust(wls, pars_arr, z_obs, ssp_data)
+    d4000 = jnp.array(
+        [
+            calc_rest_mag(wls, sed, D4000b_filt.wavelength, D4000b_filt.transmission),
+            calc_rest_mag(wls, sed, D4000r_filt.wavelength, D4000r_filt.transmission)
+        ]
+    )
+
+    return d4000[0]-d4000[1]
+
+
+v_d4000n_zo = vmap(calc_d4000n, in_axes=(None, None, 0, None))
+v_d4000n = vmap(v_d4000n_zo, in_axes=(0, None, None, None))
 
 
 def get_colors_templates(params, wls, z_obs, transm_arr, ssp_data):
@@ -923,7 +953,8 @@ def colrs_bptrews_templ_zo(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
     t_nuvk = v_nuvk_zo(wls, templ_pars, zobs, ssp_data)
-    return jnp.column_stack((t_colors, t_rews, t_nuvk))
+    t_d400n = v_d4000n_zo(wls, templ_pars, zobs, ssp_data)
+    return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d400n))
 
 vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
 
