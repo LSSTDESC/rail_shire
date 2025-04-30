@@ -748,7 +748,7 @@ class ShireInformer(CatInformer):
         )
         _selnorm = jnp.logical_and(wls>3950, wls<4000)
         norms = trapezoid(restframe_fnus[:, :, _selnorm], x=wls[_selnorm], axis=2)
-        restframe_fnus = restframe_fnus/norms
+        restframe_fnus = restframe_fnus/(norms.squeeze().expand_dims(2))
         d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
         rbmap = mpl.colormaps['coolwarm']
         cNorm = mpl.colors.Normalize(vmin=d4000n.min(), vmax=d4000n.max())
@@ -824,15 +824,17 @@ class ShireInformer(CatInformer):
             f, a = plt.subplots(1,1)
             sel = jnp.logical_and(wls>=lin-3*cont_wids[il], wls<=lin+3*cont_wids[il])
             a.plot(wls[sel], fnu[sel], ls='-', color='k', label=subdf['name'])
-            a.axvline(lin-cont_wids[il], ls=':', color='orange')
+            a.axvline(lin-cont_wids[il], ls=':', color='orange', label="Continuum bounds")
             a.axvline(lin+cont_wids[il], ls=':', color='orange')
-            a.axvline(lin-line_wids[il], ls=':', color='r')
+            a.axvline(lin-line_wids[il], ls=':', color='r', label="Line bounds")
             a.axvline(lin+line_wids[il], ls=':', color='r')
             a.axvline(lin, ls='-', color='g', label=lines_names[il])
-            a.fill_betweenx(fnu[sel], x1=lin-0.5*eqws[il], x2=lin+0.5*eqws[il], color='g', alpha=0.5, label='REW')
+            a.fill_between(wls[sel], fnu[sel], where=np.logical_and(wls>lin-0.5*eqws[il], wls<lin+0.5*eqws[il]), color='g', alpha=0.5, label=r"REW $=$"+f"{eqws::.2f}"+r"$\mathrm{\AA}$")
+            a.set_xlabel(r'Restframe wavelength $\mathrm{[\AA]}$')
+            a.set_ylabel(r'*Spectral Energy Density $\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
             a.legend()
             a.set_title(f"Restframe Equivalent Width of {lines_names[il]} for template {subdf['name']} at "+r"$z=$"+f"{z:.2f}")
             plt.show()
-            f.append(figlist)
+            figlist.append(f)
         
         return figlist
