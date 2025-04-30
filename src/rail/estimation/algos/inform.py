@@ -5,6 +5,14 @@ from jax import numpy as jnp
 #from jax import vmap, jit
 from jax.tree_util import tree_map
 #from jax import random as jrn
+try:
+    from jax.numpy import trapezoid
+except ImportError:
+    try:
+        from jax.scipy.integrate import trapezoid
+    except ImportError:
+        from jax.numpy import trapz as trapezoid
+
 import pandas as pd
 #import qp
 from tqdm import tqdm
@@ -738,6 +746,9 @@ class ShireInformer(CatInformer):
             vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
             0.001
         )
+        _selnorm = jnp.logical_and(wls>3950, wls<4000)
+        norms = trapezoid(restframe_fnus[:, :, _selnorm], x=wls[_selnorm], axis=2)
+        restframe_fnus = restframe_fnus/norms
         d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
         rbmap = mpl.colormaps['coolwarm']
         cNorm = mpl.colors.Normalize(vmin=d4000n.min(), vmax=d4000n.max())
@@ -752,14 +763,14 @@ class ShireInformer(CatInformer):
                 a.plot(wls, fnu, c=tuple(col))
             plt.colorbar(d4map, ax=a, label='D4000')
             a.set_xlabel(r'Restframe wavelength $\mathrm{[\AA]}$')
-            a.set_ylabel(r'Spectral Energy Density $\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
+            a.set_ylabel(r'Normalized Spectral Energy Density [-]') #$\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
             aa = a.twinx()
             for trans, fcol in zip(transm_arr, filtcols, strict=True):
                 aa.plot(wls/(1+z), trans, c=tuple(fcol), lw=1)
                 aa.fill_between(wls/(1+z), trans, alpha=0.3, color=tuple(fcol), lw=1)
-            aa.set_ylabel(r'Filter transmission (resp. effective area) [- (resp. $\mathrm{m^2}$)]$')
-            a.set_xscale('log')
-            a.set_yscale('log')
+            aa.set_ylabel(r'Filter transmission / effective area) [- / $\mathrm{m^2}$)]')
+            #a.set_xscale('log')
+            #a.set_yscale('log')
             a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
             secax = a.secondary_xaxis('top', functions=(lambda wl: wl*(1+z), lambda wl: wl/(1+z)))
             secax.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
@@ -813,8 +824,8 @@ class ShireInformer(CatInformer):
             f, a = plt.subplots(1,1)
             sel = jnp.logical_and(wls>=lin-3*cont_wids[il], wls<=lin+3*cont_wids[il])
             a.plot(wls[sel], fnu[sel], ls='-', color='k', label=subdf['name'])
-            a.axvline(lin-cont_wids[il], ls=':', color='o')
-            a.axvline(lin+cont_wids[il], ls=':', color='o')
+            a.axvline(lin-cont_wids[il], ls=':', color='orange')
+            a.axvline(lin+cont_wids[il], ls=':', color='orange')
             a.axvline(lin-line_wids[il], ls=':', color='r')
             a.axvline(lin+line_wids[il], ls=':', color='r')
             a.axvline(lin, ls='-', color='g', label=lines_names[il])
