@@ -748,7 +748,7 @@ class ShireInformer(CatInformer):
         )
         _selnorm = jnp.logical_and(wls>3950, wls<4000)
         norms = trapezoid(restframe_fnus[:, :, _selnorm], x=wls[_selnorm], axis=2)
-        restframe_fnus = restframe_fnus/(norms.squeeze().expand_dims(2))
+        restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
         rbmap = mpl.colormaps['coolwarm']
         cNorm = mpl.colors.Normalize(vmin=d4000n.min(), vmax=d4000n.max())
@@ -829,7 +829,7 @@ class ShireInformer(CatInformer):
             a.axvline(lin-line_wids[il], ls=':', color='r', label="Line bounds")
             a.axvline(lin+line_wids[il], ls=':', color='r')
             a.axvline(lin, ls='-', color='g', label=lines_names[il])
-            a.fill_between(wls[sel], fnu[sel], where=np.logical_and(wls>lin-0.5*eqws[il], wls<lin+0.5*eqws[il]), color='g', alpha=0.5, label=r"REW $=$"+f"{eqws::.2f}"+r"$\mathrm{\AA}$")
+            a.fill_between(wls[sel], fnu[sel], where=np.logical_and(wls>lin-0.5*eqws[il], wls<lin+0.5*eqws[il]), color='g', alpha=0.5, label=r"REW $=$"+f"{eqws[il]:.2f}"+r"$\mathrm{\AA}$")
             a.set_xlabel(r'Restframe wavelength $\mathrm{[\AA]}$')
             a.set_ylabel(r'*Spectral Energy Density $\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
             a.legend()
