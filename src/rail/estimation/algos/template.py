@@ -321,7 +321,7 @@ def calc_eqw(sur_wls, sur_spec, lin):
         Value of the nequivalent width of spectral line at $\lambda=$`lin`.
     """
     line_wid = lin * 400 / C_KMS / 2
-    cont_wid = lin * 1000 / C_KMS / 2
+    cont_wid = lin * 15000 / C_KMS / 2
     sur_flam = lsunPerHz_to_flam_noU(sur_wls, sur_spec, 0.001)
     nancont = jnp.where(jnp.logical_or(jnp.logical_and(sur_wls > lin - cont_wid, sur_wls < lin - line_wid), jnp.logical_and(sur_wls > lin + line_wid, sur_wls < lin + cont_wid)), sur_flam, jnp.nan)
     height = jnp.nanmean(nancont)

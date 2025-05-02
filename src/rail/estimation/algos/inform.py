@@ -797,7 +797,7 @@ class ShireInformer(CatInformer):
             "AGN_[SII]_6718.29_REW"
         ]
         line_wids = lines * 400 / C_KMS / 2
-        cont_wids = lines * 1000 / C_KMS / 2
+        cont_wids = lines * 15000 / C_KMS / 2
 
         sspdata = load_ssp(
             os.path.abspath(
@@ -816,7 +816,7 @@ class ShireInformer(CatInformer):
 
         for il, lin in enumerate(lines):
             f, a = plt.subplots(1,1)
-            sel = jnp.logical_and(wls>=lin-3*cont_wids[il], wls<=lin+3*cont_wids[il])
+            sel = jnp.logical_and(wls>=lin-1.5*cont_wids[il], wls<=lin+1.5*cont_wids[il])
             a.plot(wls[sel], fnu[sel], ls='-', color='k', label=subdf['name'])
             a.axvline(lin-cont_wids[il], ls=':', color='orange', label="Continuum bounds")
             a.axvline(lin+cont_wids[il], ls=':', color='orange')
