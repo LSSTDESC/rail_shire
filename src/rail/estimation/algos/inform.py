@@ -840,7 +840,7 @@ class ShireInformer(CatInformer):
             else:
                 print("Specified key not found in the templates dataframe's index.")
         pars = jnp.array(subdf[_DUMMY_PARS.PARAM_NAMES_FLAT].values, dtype=jnp.float64)
-        zref = subdf.iloc[0, self.config.redshift_col]
+        zref = subdf[self.config.redshift_col] #.iloc[0, self.config.redshift_col]
         z = zref if redshift is None else redshift
         lines = jnp.array([3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29])
         lines_names = [
