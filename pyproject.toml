@@ -29,6 +29,7 @@ dependencies = [
     "interpax",
     "jax_cosmo",
     "pandas",
+    "pz-rail-base",
     "pz-rail-dsps",
     "astro-sedpy",
     "matplotlib",
