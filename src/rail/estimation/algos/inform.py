@@ -600,7 +600,7 @@ class ShireInformer(CatInformer):
         pars_arr = jnp.array(self.templates_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
         cdict = dict(zip(srcs, fcolors, strict=True))
         all_sfh = vmap_mean_sfr(pars_arr)
-        _min, _max = all_sfh.max()/100000, all_sfh.max()*1.1
+        _min, _max = all_sfh.max()/1e6, all_sfh.max()*1.1
         f, a = plt.subplots(1,1)
         for sfh, src in zip(all_sfh, self.templates_df['Dataset'], strict=True):
             a.plot(T_ARR, sfh, lw=1, ls='-', c=cdict[src])
