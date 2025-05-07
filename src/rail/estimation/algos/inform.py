@@ -526,6 +526,7 @@ class ShireInformer(CatInformer):
                 style='Dataset',
                 legend='brief'
             )
+            a.grid()
 
             handles, labels = a.get_legend_handles_labels()
             a.legend(handles=[handles[0]]+[leg1]+handles, labels=['Training set']+['LSST sim']+labels)
@@ -605,6 +606,8 @@ class ShireInformer(CatInformer):
             a.set_xlabel('Age of the Universe [Gyr]')
             a.set_ylabel('SFR '+r"$\mathrm{M_\odot.yr}^{-1}$")
             a.set_title('SFH of photo-z templates')
+            a.set_ylim(sfh.max()/100000, sfh.max()*1.1)
+            a.set_yscale('log')
 
         legs = []
         for src, colr in cdict.items():
@@ -820,6 +823,7 @@ class ShireInformer(CatInformer):
             #a.set_xscale('log')
             a.set_yscale('log')
             a.set_xlim(1000.0, 25000.0)
+            a.grid()
             a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
             secax = a.secondary_xaxis('top', functions=(lambda wl: wl/(1+z), lambda wl: wl*(1+z)))
             secax.set_xlabel(r'Resframe wavelength $\mathrm{[\AA]}$')
