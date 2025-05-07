@@ -195,7 +195,7 @@ def plot_zp_zs_ensemble(ens_PDFs, z_true, z_grid=None, key_estim="zmode", label=
         bbox_to_anchor=(1., 0.)
     )
     ax.grid()
-    ax.set_title(f"{100.0*outl_rate:.3f}% outliers ;\nsigma_mad: {sig_mad:.3f}.")
+    ax.set_title(f"{100.0*outl_rate:.3f}% outliers ;\n"+r"$\sigma_{MAD}=$"+f"{sig_mad:.3f}")
 
     #plt.colorbar(scalarMap, ax=ax, location='right', label="Scatter (%)")
     _ = f.colorbar(density, label='Density', location='right')
