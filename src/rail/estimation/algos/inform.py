@@ -823,7 +823,7 @@ class ShireInformer(CatInformer):
             aa.set_ylabel(r'Filter transmission / effective area [- / $\mathrm{m^2}$]')
             #a.set_xscale('log')
             a.set_yscale('log')
-            a.set_xlim(1000.0, 25000.0)
+            a.set_xlim(self.config.wlmin, self.config.wlmax+self.config.dwl)
             a.grid()
             a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
             secax = a.secondary_xaxis('top', functions=(lambda wl: wl/(1+z), lambda wl: wl*(1+z)))
