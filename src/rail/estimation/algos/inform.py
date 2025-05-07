@@ -2,7 +2,7 @@ import os
 import jax
 import numpy as np
 from jax import numpy as jnp
-#from jax import vmap, jit
+from jax import vmap
 from jax.tree_util import tree_map
 #from jax import random as jrn
 
@@ -23,10 +23,12 @@ import matplotlib as mpl
 import seaborn as sns
 
 from .io_utils import load_ssp, istuple, SHIREDATALOC
-from .analysis import _DUMMY_PARS, lsunPerHz_to_fnu_noU, C_KMS #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
+from .analysis import _DUMMY_PARS, lsunPerHz_to_fnu_noU, C_KMS, convert_flux_toobsframe #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
 from .template import (
     vmap_cols_zo,
+    vmap_cols_zo_leg,
     colrs_bptrews_templ_zo,
+    colrs_bptrews_templ_zo_leg,
     lim_HII_comp,
     lim_seyf_liner,
     Ka03_nii,
@@ -37,6 +39,7 @@ from .template import (
     Ke06_sii,
     vmap_mean_spectrum_nodust,
     v_d4000n,
+    calc_d4000n,
     mean_spectrum_nodust,
     vmap_calc_eqw
 )
@@ -74,6 +77,11 @@ class ShireInformer(CatInformer):
             str,
             "dsps_valid_fits_F2_GG_DESI_SM3.h5",
             msg="name of the file specifying the set of galaxies from which to pick templates."
+        ),
+        templ_type=Param(
+            str,
+            "SPS",
+            msg='Whether to use the "SPS" or "Legacy" method to derive the templates colours from the SPS parameters.'
         ),
         ssp_file=Param(
             str,
@@ -232,19 +240,35 @@ class ShireInformer(CatInformer):
         '''
         templs_df = self.templates_df
         templ_pars_arr = jnp.array(templs_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
-        templ_tupl = [tuple(_pars) for _pars in templ_pars_arr]
+        templ_zref = jnp.array(templs_df[self.config.redshift_col])
 
-        templ_tupl_sps = tree_map(
-            lambda partup: colrs_bptrews_templ_zo(
-                jnp.array(partup),
-                fwls,
-                pzs,
-                ftransm,
-                sspdata
-            ),
-            templ_tupl,
-            is_leaf=istuple
-        )
+        if "sps" in self.config.templ_type.lower():
+            templ_tupl = [tuple(_pars) for _pars in templ_pars_arr]
+            templ_tupl_sps = tree_map(
+                lambda partup: colrs_bptrews_templ_zo(
+                    jnp.array(partup),
+                    fwls,
+                    pzs,
+                    ftransm,
+                    sspdata
+                ),
+                templ_tupl,
+                is_leaf=istuple
+            )
+        else:
+            templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(templ_pars_arr, templ_zref, strict=True)]
+            templ_tupl_sps = tree_map(
+                lambda partup: colrs_bptrews_templ_zo_leg(
+                    jnp.array(partup[:-1]),
+                    fwls,
+                    pzs,
+                    partup[-1],
+                    ftransm,
+                    sspdata
+                ),
+                templ_tupl,
+                is_leaf=istuple
+            )
 
         filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
         color_names = [f"{n1}-{n2}" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
@@ -296,8 +320,7 @@ class ShireInformer(CatInformer):
         )
 
         pars_arr = jnp.array(templs_ref_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
-
-        templ_tupl = [tuple(_pars) for _pars in pars_arr]
+        templ_zref = jnp.array(templs_ref_df[self.config.redshift_col])
 
         ssp_data = load_ssp(
             os.path.abspath(
@@ -308,18 +331,33 @@ class ShireInformer(CatInformer):
                 )
             )
         )
-
-        templ_tupl_sps = tree_map(
-            lambda partup: vmap_cols_zo(
-                jnp.array(partup),
-                wls,
-                self.pzs,
-                transm_arr,
-                ssp_data
-            ),
-            templ_tupl,
-            is_leaf=istuple
-        )
+        if "sps" in self.config.templ_type.lower():
+            templ_tupl = [tuple(_pars) for _pars in pars_arr]
+            templ_tupl_sps = tree_map(
+                lambda partup: vmap_cols_zo(
+                    jnp.array(partup),
+                    wls,
+                    self.pzs,
+                    transm_arr,
+                    ssp_data
+                ),
+                templ_tupl,
+                is_leaf=istuple
+            )
+        else:
+            templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(pars_arr, templ_zref, strict=True)]
+            templ_tupl_sps = tree_map(
+                lambda partup: vmap_cols_zo_leg(
+                    jnp.array(partup[:-1]),
+                    wls,
+                    self.pzs,
+                    partup[-1],
+                    transm_arr,
+                    ssp_data
+                ),
+                templ_tupl,
+                is_leaf=istuple
+            )
 
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_ref_df.iterrows()):
@@ -726,6 +764,7 @@ class ShireInformer(CatInformer):
             assert isinstance(redshifts, jnp.ndarray), "Please specify the redshift as a single value or a list, tuple, numpy array or jax array of values."
         wls, transm_arr = self._load_filters()
         templ_pars = jnp.array(self.templates_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+        templ_zref = jnp.array(self.templates_df[self.config.redshift_col])
         sspdata = load_ssp(
             os.path.abspath(
                 os.path.join(
@@ -735,14 +774,26 @@ class ShireInformer(CatInformer):
                 )
             )
         )
-        restframe_fnus = lsunPerHz_to_fnu_noU(
-            vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
-            0.001
-        )
-        _selnorm = jnp.logical_and(wls>3950, wls<4000)
-        norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
-        restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
-        d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
+        if "sps" in self.config.templ_type.lower():
+            restframe_fnus = lsunPerHz_to_fnu_noU(
+                vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
+                0.001
+            )
+            d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
+            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
+            restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
+        else:
+            _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
+            _vd4k = vmap(calc_d4000n, in_axes=(0, None, 0, None))
+            restframe_fnus = lsunPerHz_to_fnu_noU(
+                _vspec(wls, templ_pars, templ_zref, sspdata),
+                0.001
+            )
+            d4000n = _vd4k(templ_pars, wls, templ_zref, sspdata)
+            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            norms = jnp.nanmean(restframe_fnus[:, _selnorm], axis=1)
+            restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 1)
         rbmap = mpl.colormaps['coolwarm']
         cNorm = mpl.colors.Normalize(vmin=d4000n.min(), vmax=d4000n.max())
         d4map = mpl.cm.ScalarMappable(norm=cNorm, cmap=rbmap)
@@ -752,22 +803,26 @@ class ShireInformer(CatInformer):
         figlist = []
         for iz, z in enumerate(redshifts):
             f, a = plt.subplots(1,1, figsize=(7, 4), constrained_layout=True)
-            for fnu, col in zip(restframe_fnus[:, iz, :], d4cols[:, iz, :], strict=True):
-                a.plot(wls, fnu, c=tuple(col))
+            if "sps" in self.config.templ_type.lower():
+                for fnu, col in zip(restframe_fnus[:, iz, :], d4cols[:, iz, :], strict=True):
+                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=tuple(col))
+            else:
+                for fnu, col in zip(restframe_fnus, d4cols, strict=True):
+                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=tuple(col))
             plt.colorbar(d4map, ax=a, label='D4000')
-            a.set_xlabel(r'Restframe wavelength $\mathrm{[\AA]}$')
+            a.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
             a.set_ylabel(r'Normalized Spectral Energy Density [-]') #$\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
             aa = a.twinx()
             for trans, fcol in zip(transm_arr, filtcols, strict=True):
-                aa.plot(wls/(1+z), trans, c=tuple(fcol), lw=1)
-                aa.fill_between(wls/(1+z), trans, alpha=0.3, color=tuple(fcol), lw=1)
+                aa.plot(wls, trans, c=tuple(fcol), lw=1)
+                aa.fill_between(wls, trans, alpha=0.3, color=tuple(fcol), lw=1)
             aa.set_ylabel(r'Filter transmission / effective area) [- / $\mathrm{m^2}$)]')
             #a.set_xscale('log')
             a.set_yscale('log')
-            a.set_xlim(1000.0/(1+z), 25000.0/(1+z))
+            a.set_xlim(1000.0, 25000.0)
             a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
-            secax = a.secondary_xaxis('top', functions=(lambda wl: wl*(1+z), lambda wl: wl/(1+z)))
-            secax.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
+            secax = a.secondary_xaxis('top', functions=(lambda wl: wl/(1+z), lambda wl: wl*(1+z)))
+            secax.set_xlabel(r'Resframe wavelength $\mathrm{[\AA]}$')
             figlist.append(f)
             plt.show()
         return figlist
@@ -785,7 +840,8 @@ class ShireInformer(CatInformer):
             else:
                 print("Specified key not found in the templates dataframe's index.")
         pars = jnp.array(subdf[_DUMMY_PARS.PARAM_NAMES_FLAT].values, dtype=jnp.float64)
-        z = subdf.iloc[0, self.config.redshift_col] if redshift is None else redshift
+        zref = subdf.iloc[0, self.config.redshift_col]
+        z = zref if redshift is None else redshift
         lines = jnp.array([3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29])
         lines_names = [
             "SF_[OII]_3728.48_REW",
@@ -810,7 +866,7 @@ class ShireInformer(CatInformer):
         )
 
         wls = jnp.arange(3500., 7000., 0.1)
-        sed = mean_spectrum_nodust(wls, pars, z, sspdata)
+        sed = mean_spectrum_nodust(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum_nodust(wls, pars, zref, sspdata)
         eqws = vmap_calc_eqw(wls, sed, lines)
         fnu = lsunPerHz_to_fnu_noU(sed, 0.001)
 

@@ -568,6 +568,23 @@ def get_colors_templates_nodust(params, wls, z_obs, transm_arr, ssp_data):
 vmap_cols_zo_nodust = vmap(get_colors_templates_nodust, in_axes=(None, None, 0, None, None))
 vmap_cols_templ_nodust = vmap(vmap_cols_zo_nodust, in_axes=(0, None, None, None, None))
 
+def get_colors_templates_leg(params, wls, z_obs, z_ref, transm_arr, ssp_data):
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_ref, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, transm_arr, z_obs)
+    return _mags[:-1]-_mags[1:]
+
+vmap_cols_zo_leg = vmap(get_colors_templates_leg, in_axes=(None, None, 0, None, None, None))
+vmap_cols_templ_leg = vmap(vmap_cols_zo_leg, in_axes=(0, None, None, 0, None, None))
+
+
+def get_colors_templates_nodust_leg(params, wls, z_obs, z_ref, transm_arr, ssp_data):
+    ssp_wave, sed, _ = ssp_spectrum_fromparam(params, z_ref, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed, wls, transm_arr, z_obs)
+    return _mags[:-1]-_mags[1:]
+
+vmap_cols_zo_nodust_leg = vmap(get_colors_templates_nodust_leg, in_axes=(None, None, 0, None, None, None))
+vmap_cols_templ_nodust_leg = vmap(vmap_cols_zo_nodust_leg, in_axes=(0, None, None, 0, None, None))
+
 def make_sps_templates(params_arr, wls, transm_arr, redz_arr, av_arr, ssp_data):
     """make_sps_templates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
 
@@ -1009,6 +1026,29 @@ def bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data):
 
 vmap_bpt_rews_dusty = vmap(bpt_rews_pars_zo_dusty, in_axes=(0, None, None))
 
+
+@jit
+def bpt_rews_pars_leg(templ_pars, zref, ssp_data):
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_seds = mean_spectrum_nodust(_wls, templ_pars, zref, ssp_data)
+    rews = vmap_calc_eqw(_wls, templ_seds, _lines_wl)
+    return rews
+
+vmap_bpt_rews_leg = vmap(bpt_rews_pars_leg, in_axes=(0, 0, None))
+
+@jit
+def bpt_rews_pars_dusty_leg(templ_pars, zref, ssp_data):
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_seds = mean_spectrum(_wls, templ_pars, zref, ssp_data)
+    rews = vmap_calc_eqw(_wls, templ_seds, _lines_wl)
+    return rews
+
+vmap_bpt_rews_dusty_leg = vmap(bpt_rews_pars_dusty_leg, in_axes=(0, 0, None))
+
+
+@jit
 def colrs_bptrews_templ_zo(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo_nodust(templ_pars, wls, zobs, transm_arr, ssp_data)
@@ -1018,6 +1058,7 @@ def colrs_bptrews_templ_zo(templ_pars, wls, zobs, transm_arr, ssp_data):
 
 vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
 
+@jit
 def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
@@ -1025,7 +1066,42 @@ def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_d4000n = v_d4000n_zo_dusty(templ_pars, wls, zobs, ssp_data)
     return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d4000n))
 
-vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
+vmap_colrs_bptrews_templ_zo_dusty = vmap(colrs_bptrews_templ_zo_dusty, in_axes=(0, None, None, None, None))
+
+
+@jit
+def colrs_bptrews_templ_zo_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data):
+    t_rews = bpt_rews_pars_leg(templ_pars, zref, ssp_data)
+    t_colors = vmap_cols_zo_nodust_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data)
+    t_nuvk = calc_nuvk(templ_pars, wls, zref, ssp_data)
+    t_d4000n = calc_d4000n(templ_pars, wls, zref, ssp_data)
+    return jnp.column_stack(
+        (
+            t_colors,
+            jnp.full((t_colors.shape[0], t_rews.shape[0]), t_rews),
+            jnp.full(t_colors.shape[0], t_nuvk),
+            jnp.full(t_colors.shape[0], t_d4000n)
+        )
+    )
+
+vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo_leg, in_axes=(0, None, None, 0, None, None))
+
+@jit
+def colrs_bptrews_templ_zo_dusty_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data):
+    t_rews = bpt_rews_pars_dusty_leg(templ_pars, zref, ssp_data)
+    t_colors = vmap_cols_zo_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data)
+    t_nuvk = calc_nuvk_dusty(templ_pars, wls, zref, ssp_data)
+    t_d4000n = calc_d4000n_dusty(templ_pars, wls, zref, ssp_data)
+    return jnp.column_stack(
+        (
+            t_colors,
+            jnp.full((t_colors.shape[0], t_rews.shape[0]), t_rews),
+            jnp.full(t_colors.shape[0], t_nuvk),
+            jnp.full(t_colors.shape[0], t_d4000n)
+        )
+    )
+
+vmap_colrs_bptrews_templ_zo_dusty = vmap(colrs_bptrews_templ_zo_dusty_leg, in_axes=(0, None, None, 0, None, None))
 
 
 def bpt_classif(templ_df, ssp_data, zkey='redshift', dusty=False):
