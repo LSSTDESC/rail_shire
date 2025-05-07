@@ -820,7 +820,7 @@ class ShireInformer(CatInformer):
             for trans, fcol in zip(transm_arr, filtcols, strict=True):
                 aa.plot(wls, trans, c=tuple(fcol), lw=1)
                 aa.fill_between(wls, trans, alpha=0.3, color=tuple(fcol), lw=1)
-            aa.set_ylabel(r'Filter transmission / effective area) [- / $\mathrm{m^2}$)]')
+            aa.set_ylabel(r'Filter transmission / effective area [- / $\mathrm{m^2}$]')
             #a.set_xscale('log')
             a.set_yscale('log')
             a.set_xlim(1000.0, 25000.0)
