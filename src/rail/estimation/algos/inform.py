@@ -109,10 +109,17 @@ class ShireInformer(CatInformer):
             100.,
             msg='dwl (float): step of wavelength grid for filters interpolation'
         ),
+        randomsel=Param(
+            bool,
+            False,
+            msg='randomsel (bool): whether to select a random sample of the galaxies in `spectra_file` instead of fitting it to training data colours.'
+                'In that case, `colrsbins` specifies the size of the random sample.'
+        ),
         colrsbins=Param(
             int,
             40,
             msg='colrsbins (int): number of bins for each colour index in which to select the template with the best score.'
+                'If `randomsel` is `True`, this specifies the number of randomly selected galaxies to be used as templates.'
         )
     )
 
@@ -319,122 +326,126 @@ class ShireInformer(CatInformer):
             key="fit_dsps"
         )
 
-        pars_arr = jnp.array(templs_ref_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
-        templ_zref = jnp.array(templs_ref_df[self.config.redshift_col])
-
-        ssp_data = load_ssp(
-            os.path.abspath(
-                os.path.join(
-                    self.data_path,
-                    "SSP",
-                    self.config.ssp_file
-                )
-            )
-        )
-        if "sps" in self.config.templ_type.lower():
-            templ_tupl = [tuple(_pars) for _pars in pars_arr]
-            templ_tupl_sps = tree_map(
-                lambda partup: vmap_cols_zo(
-                    jnp.array(partup),
-                    wls,
-                    self.pzs,
-                    transm_arr,
-                    ssp_data
-                ),
-                templ_tupl,
-                is_leaf=istuple
-            )
+        if self.config.randomsel:
+            templs_score_df = templs_ref_df.sample(n=self.config.colrsbins, replace=False)
+            templs_score_df['score'] = np.full(self.config.colrsbins, -1)
         else:
-            templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(pars_arr, templ_zref, strict=True)]
-            templ_tupl_sps = tree_map(
-                lambda partup: vmap_cols_zo_leg(
-                    jnp.array(partup[:-1]),
-                    wls,
-                    self.pzs,
-                    partup[-1],
-                    transm_arr,
-                    ssp_data
-                ),
-                templ_tupl,
-                is_leaf=istuple
+            pars_arr = jnp.array(templs_ref_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+            templ_zref = jnp.array(templs_ref_df[self.config.redshift_col])
+
+            ssp_data = load_ssp(
+                os.path.abspath(
+                    os.path.join(
+                        self.data_path,
+                        "SSP",
+                        self.config.ssp_file
+                    )
+                )
+            )
+            if "sps" in self.config.templ_type.lower():
+                templ_tupl = [tuple(_pars) for _pars in pars_arr]
+                templ_tupl_sps = tree_map(
+                    lambda partup: vmap_cols_zo(
+                        jnp.array(partup),
+                        wls,
+                        self.pzs,
+                        transm_arr,
+                        ssp_data
+                    ),
+                    templ_tupl,
+                    is_leaf=istuple
+                )
+            else:
+                templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(pars_arr, templ_zref, strict=True)]
+                templ_tupl_sps = tree_map(
+                    lambda partup: vmap_cols_zo_leg(
+                        jnp.array(partup[:-1]),
+                        wls,
+                        self.pzs,
+                        partup[-1],
+                        transm_arr,
+                        ssp_data
+                    ),
+                    templ_tupl,
+                    is_leaf=istuple
+                )
+
+            templs_as_dict = {}
+            for it, (tname, row) in enumerate(templs_ref_df.iterrows()):
+                _colrs = templ_tupl_sps[it]
+                _df = pd.DataFrame(columns=self.color_names, data=_colrs)
+                _df['z_p'] = self.pzs
+                _df['Dataset'] = np.full(self.pzs.shape, row['Dataset'])
+                _df['name'] = np.full(self.pzs.shape, tname)
+                templs_as_dict.update({f"{tname}": _df})
+            all_templs_df = pd.concat(
+                [_df for _, _df in templs_as_dict.items()],
+                ignore_index=True
             )
 
-        templs_as_dict = {}
-        for it, (tname, row) in enumerate(templs_ref_df.iterrows()):
-            _colrs = templ_tupl_sps[it]
-            _df = pd.DataFrame(columns=self.color_names, data=_colrs)
-            _df['z_p'] = self.pzs
-            _df['Dataset'] = np.full(self.pzs.shape, row['Dataset'])
-            _df['name'] = np.full(self.pzs.shape, tname)
-            templs_as_dict.update({f"{tname}": _df})
-        all_templs_df = pd.concat(
-            [_df for _, _df in templs_as_dict.items()],
-            ignore_index=True
-        )
+            list_edges = []
+            for idc, c in enumerate(self.color_names):
+                _arr = np.array(train_df[c])
+                #H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins=self.config.colrsbins) #, bins='auto') #
+                #H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
+                #H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins='auto')
+                #H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
+                _edges1d = np.histogram_bin_edges(_arr[np.isfinite(_arr)], bins=self.config.colrsbins)
+                list_edges.append(_edges1d)
 
-        list_edges = []
-        for idc, c in enumerate(self.color_names):
-            _arr = np.array(train_df[c])
-            #H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins=self.config.colrsbins) #, bins='auto') #
-            #H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
-            #H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins='auto')
-            #H_templ_1d, _edges1d = np.histogram(np.array(all_templs_df[c]), bins=_edges1d)
-            _edges1d = np.histogram_bin_edges(_arr[np.isfinite(_arr)], bins=self.config.colrsbins)
-            list_edges.append(_edges1d)
+            coords = []
+            for c, b in zip(self.color_names, list_edges):
+                c_idxs = np.digitize(train_df[c], b)
+                coords.append(c_idxs)
+            coords = np.column_stack(coords)
+            train_df[[f'{c}_bin' for c in self.color_names]] = coords
 
-        coords = []
-        for c, b in zip(self.color_names, list_edges):
-            c_idxs = np.digitize(train_df[c], b)
-            coords.append(c_idxs)
-        coords = np.column_stack(coords)
-        train_df[[f'{c}_bin' for c in self.color_names]] = coords
+            templ_coords = []
+            for c, b in zip(self.color_names, list_edges):
+                c_idxs = np.digitize(all_templs_df[c], b)
+                templ_coords.append(c_idxs)
+            templ_coords = np.column_stack(templ_coords)
+            all_templs_df[[f'{c}_bin' for c in self.color_names]] = templ_coords
 
-        templ_coords = []
-        for c, b in zip(self.color_names, list_edges):
-            c_idxs = np.digitize(all_templs_df[c], b)
-            templ_coords.append(c_idxs)
-        templ_coords = np.column_stack(templ_coords)
-        all_templs_df[[f'{c}_bin' for c in self.color_names]] = templ_coords
+            best_templs_names = []
+            allbestscores = []
+            print("Computing scores in colour bins:")
+            for c in self.color_names:
+                for cbin in tqdm(jnp.unique(train_df[f'{c}_bin'].values)):
+                #cbin = row[f'{c}_bin']
+                    sel = train_df[f'{c}_bin']==cbin
+                    _sel_df = train_df[sel]
+                    zs = jnp.array(_sel_df[self.config["redshift_col"]].values)
+                    sel_templ = all_templs_df[f'{c}_bin']==cbin
+                    _templ_df = all_templs_df[sel_templ]
+                    scores = jnp.array(
+                        [
+                            jnp.sum(jnp.abs(zs-zp)/(1+zs)) / zs.shape[0] if zs.shape[0]>0 else jnp.nan for zp in _templ_df['z_p']
+                        ]
+                    )
+                    if scores.shape[0]>0 and not jnp.all(jnp.isnan(scores)):
+                        ix_best = int(jnp.nanargmin(scores))
+                        bestscore = scores[ix_best]
+                        if bestscore < 0.15:
+                            best_templs_names.append(_templ_df['name'].iloc[ix_best])
+                            allbestscores.append(scores[ix_best])
 
-        best_templs_names = []
-        allbestscores = []
-        print("Computing scores in colour bins:")
-        for c in self.color_names:
-            for cbin in tqdm(jnp.unique(train_df[f'{c}_bin'].values)):
-            #cbin = row[f'{c}_bin']
-                sel = train_df[f'{c}_bin']==cbin
-                _sel_df = train_df[sel]
-                zs = jnp.array(_sel_df[self.config["redshift_col"]].values)
-                sel_templ = all_templs_df[f'{c}_bin']==cbin
-                _templ_df = all_templs_df[sel_templ]
-                scores = jnp.array(
-                    [
-                        jnp.sum(jnp.abs(zs-zp)/(1+zs)) / zs.shape[0] if zs.shape[0]>0 else jnp.nan for zp in _templ_df['z_p']
-                    ]
-                )
-                if scores.shape[0]>0 and not jnp.all(jnp.isnan(scores)):
-                    ix_best = int(jnp.nanargmin(scores))
-                    bestscore = scores[ix_best]
-                    if bestscore < 0.15:
-                        best_templs_names.append(_templ_df['name'].iloc[ix_best])
-                        allbestscores.append(scores[ix_best])
+            best_templ_sels = np.unique(best_templs_names)
+            allbestscores = jnp.array(allbestscores)
 
-        best_templ_sels = np.unique(best_templs_names)
-        allbestscores = jnp.array(allbestscores)
+            meanscores = []
+            print("Finalising templates:")
+            for it, nt in tqdm(enumerate(best_templ_sels), total=len(best_templ_sels)):
+                _sel = jnp.array([_t==nt for _t in best_templs_names])
+                _sc = allbestscores[_sel]
+                meanscores.append(jnp.nanmean(_sc))
+            meanscores = jnp.array(meanscores)
 
-        meanscores = []
-        print("Finalising templates:")
-        for it, nt in tqdm(enumerate(best_templ_sels), total=len(best_templ_sels)):
-            _sel = jnp.array([_t==nt for _t in best_templs_names])
-            _sc = allbestscores[_sel]
-            meanscores.append(jnp.nanmean(_sc))
-        meanscores = jnp.array(meanscores)
-
-        templs_score_df = templs_ref_df.loc[best_templ_sels]
-        for msc, tn in zip(meanscores, best_templ_sels):
-            templs_score_df.loc[tn, 'score'] = float(msc)
-            templs_score_df.loc[tn, 'name'] = tn
-        templs_score_df.sort_values('score', ascending=True, inplace=True)
+            templs_score_df = templs_ref_df.loc[best_templ_sels]
+            for msc, tn in zip(meanscores, best_templ_sels):
+                templs_score_df.loc[tn, 'score'] = float(msc)
+                templs_score_df.loc[tn, 'name'] = tn
+            templs_score_df.sort_values('score', ascending=True, inplace=True)
 
         tables_io.write(
             templs_score_df,
