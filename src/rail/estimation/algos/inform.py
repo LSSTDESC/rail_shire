@@ -330,6 +330,7 @@ class ShireInformer(CatInformer):
             print(f"Selecting {self.config.colrsbins} random templates.")
             templs_score_df = templs_ref_df.sample(n=self.config.colrsbins, replace=False)
             templs_score_df['score'] = np.full(self.config.colrsbins, -1)
+            templs_score_df['name'] = templs_score_df.index
         else:
             print(f"Using training data to select the best templates from {self.config.colrsbins} bins for each colour index.")
             pars_arr = jnp.array(templs_ref_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
