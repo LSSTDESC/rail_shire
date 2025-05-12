@@ -10,6 +10,8 @@ import pandas as pd
 #import qp
 from tqdm import tqdm
 import tables_io
+from sklearn.ensemble import RandomForestClassifier
+import scipy.optimize as sciop
 from ceci.config import StageParameter as Param
 from rail.estimation.estimator import CatInformer
 #from rail.utils.path_utils import RAILDIR
@@ -48,7 +50,8 @@ from .cosmology import prior_mod
 
 jax.config.update("jax_enable_x64", True)
 
-def nzfunc(z, z0, alpha, km, m, m0):  # pragma: no cover
+def nzfunc(X, m0, m, z):  # pragma: no cover
+    z0, alpha, km = X
     zm = z0 + (km * (m - m0))
     return np.power(z, alpha) * np.exp(-1. * np.power((z / zm), alpha))
 
@@ -65,6 +68,7 @@ class ShireInformer(CatInformer):
         err_bands=SHARED_PARAMS,
         ref_band=SHARED_PARAMS,
         redshift_col=SHARED_PARAMS,
+        m0=Param(float, 20.0, msg="reference apparent mag, used in prior param"),
         data_path=Param(
             str,
             "None",
@@ -120,7 +124,11 @@ class ShireInformer(CatInformer):
             40,
             msg='colrsbins (int): number of bins for each colour index in which to select the template with the best score.'
                 'If `randomsel` is `True`, this specifies the number of randomly selected galaxies to be used as templates.'
-        )
+        ),
+        init_kt=Param(float, 0.3, msg="initial guess for kt in training"),
+        init_zo=Param(float, 0.4, msg="initial guess for z0 in training"),
+        init_alpha=Param(float, 1.8, msg="initial guess for alpha in training"),
+        init_km=Param(float, 0.1, msg="initial guess for km in training"),
     )
 
     def __init__(self, args, **kwargs):
@@ -143,7 +151,7 @@ class ShireInformer(CatInformer):
         self.szs = None
         self.pzs = None
         self.besttypes = None
-        self.m0 = None
+        self.m0 = self.config.m0
         self.templates_df = None
         self.filters_names = None
         self.color_names = None
@@ -302,6 +310,86 @@ class ShireInformer(CatInformer):
         )
 
         return all_templs_df
+
+
+    def _frac_likelihood(self, frac_params):
+        ngal = len(self.mags)
+        probs = np.zeros([self.ntyp, ngal])
+        foarr = frac_params[:self.ntyp - 1]
+        ktarr = frac_params[self.ntyp - 1:]
+        for i in range(self.ntyp - 1):
+            probs[i, :] = [foarr[i] * np.exp(-1. * ktarr[i] * (mag - self.m0)) for mag in self.mags]
+        # set the probability of last element to 1 - sum of the others to
+        # keep normalized, this is the way BPZ does things
+        probs[self.ntyp - 1, :] = 1. - np.sum(probs[:-1, :], axis=0)
+        likelihood = 0.0
+        for i, typ in enumerate(self.besttypes):
+            if probs[typ, i] > 0.0:
+                likelihood += -2. * np.log10(probs[typ, i])
+        return likelihood
+
+    def _find_fractions(self):
+        # set up fo and kt arrays, choose default start values
+        if self.ntyp == 1:
+            fo_init = np.array([1.0])
+            kt_init = np.array([self.config.init_kt])
+        else:
+            fo_init = np.ones(self.ntyp - 1) / (self.ntyp)
+            kt_init = np.ones(self.ntyp - 1) * self.config.init_kt
+        fracparams = np.hstack([fo_init, kt_init])
+        # run scipy optimize to find best params
+        # note that best fit vals are stored as "x" for some reason
+        frac_results = sciop.minimize(self._frac_likelihood, fracparams, method="nelder-mead").x
+        if self.ntyp == 1:
+            self.fo_arr = np.array([frac_results[0]])
+            self.kt_arr = np.array([frac_results[1]])
+        else:
+            tmpfo = frac_results[:self.ntyp - 1]
+            # minimizer can sometimes give fractions greater than one, if so normalize
+            fracnorm = np.sum(tmpfo)
+            if fracnorm > 1.:  # pragma: no cover
+                print("bad norm for f0, normalizing")
+                tmpfo /= fracnorm
+            self.fo_arr = tmpfo
+            self.kt_arr = frac_results[self.ntyp - 1:]
+
+
+    def class_nuvk(self, test_df):
+        refcategs = {"E_S0", "Sbc", "Scd", "Irr"}
+        wls, transm = self._load_filters()
+        all_tsels_df = self._nuvk_classif()
+        classifier = RandomForestClassifier() # use defaults settings for now
+        X = np.array(all_tsels_df[self.color_names+[self.config.redshift_col]])
+        y = np.array(all_tsels_df['CAT_NUVK'])
+        classifier.fit(X, y)
+
+        Xtest = np.array(test_df[self.color_names+[self.config.redshift_col]])
+        ytest = classifier.predict(Xtest)
+        yvals, ycounts = np.unique(ytest, return_counts=True)
+
+        test_df['CAT_NUVK'] = ytest
+
+        fracs = jnp.array([ycounts[np.argwhere(yvals==refcat)[0]]/ytest.shape[0] for refcat in refcategs])
+        self.fo_arr = fracs
+
+
+        z0list = []
+        alflist = []
+        kmlist = []
+        m0list = []
+
+        for cat in refcategs:
+            subdf = test_df[test_df['CAT_NUVK']==cat]
+            m_i = np.array(subdf[self.config.ref_band])
+            zs = np.array(subdf[self.config.redshift_col])
+            _nz, _bins = np.histogram(zs, bins=self.pzs, density=True)
+            nz = np.array([_nz[nbin] for nbin in np.digitize(zs, _bins)])
+            z0, alpha, km = sciop.curve_fit(nzfunc, (self.m0, m_i, zs), nz)[0]
+            z0list.append(z0)
+            alflist.append(alpha)
+            kmlist.append(km)
+        return jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist), jnp.array(m0list)
+
 
 
     def run(self):
