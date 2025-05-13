@@ -263,24 +263,28 @@ def hist_outliers(qp_ens_1, zs, z_grid=None, key_estim='zmode', label1='', qp_en
     bias1 = zp1 - zs
     errz1 = bias1/(1+zs)
     outliers1 = jnp.nonzero(jnp.abs(errz1)*100.0 > 15) #3*sigscat) #
-    _n, _bins, _ = ax.hist(zs[outliers1], bins='auto', density=False, label=label1, alpha=0.7)
+    _nsz, _binsz = jnp.histogram(zs, bins=50, density=False)
+    _n1, _ = jnp.histogram(zs[outliers1], bins=_binsz, density=False)
+    ax.stairs(100.0*_n1/_nsz, edges=_binsz, fill=True, label=label1, alpha=0.57)
 
     if qp_ens_2 is not None:
         zp2 = jnp.squeeze(qp_ens_2.mode(z_grid)) if key_estim is None else qp_ens_2.ancil[key_estim]
         bias2 = zp2 - zs
         errz2 = bias2/(1+zs)
         outliers2 = jnp.nonzero(jnp.abs(errz2)*100.0 > 15) #3*sigscat) #
-        ax.hist(zs[outliers2], bins=_bins, density=False, label=label2, alpha=0.7)
+        _n2, _ = jnp.histogram(zs[outliers2], bins=_binsz, density=False)
+        ax.stairs(100.0*_n2/_nsz, edges=_binsz, fill=True, label=label2, alpha=0.57)
 
     if qp_ens_3 is not None:
         zp3 = jnp.squeeze(qp_ens_3.mode(z_grid)) if key_estim is None else qp_ens_3.ancil[key_estim]
         bias3 = zp3 - zs
         errz3 = bias3/(1+zs)
         outliers3 = jnp.nonzero(jnp.abs(errz3)*100.0 > 15) #3*sigscat) #
-        ax.hist(zs[outliers3], bins=_bins, density=False, label=label3, alpha=0.7)
+        _n3, _ = jnp.histogram(zs[outliers3], bins=_binsz, density=False)
+        ax.stairs(100.0*_n3/_nsz, edges=_binsz, fill=True, label=label3, alpha=0.57)
     
     #ax.set_aspect("equal", "box")
     ax.set_xlabel(r"$z_{spec}$")
-    ax.set_ylabel("Outliers count")
+    ax.set_ylabel("Outliers in bins [%]")
     ax.legend()
     return ax
