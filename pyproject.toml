@@ -1,5 +1,5 @@
 [project]
-name = "pz-rail-dspsxfors2"
+name = "pz-rail-shire"
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
 readme = "README.md"
@@ -21,15 +21,19 @@ dependencies = [
     "astropy",
     "h5py",
     "tqdm",
-    "diffstar",
-    "diffmah",
+    "diffstar<=0.3.2",
+    "diffmah<=0.6.1",
     "dsps",
     "jax",
     "jaxlib",
     "interpax",
     "jax_cosmo",
     "pandas",
-    "pz-rail-dsps"
+    "pz-rail-base",
+    "pz-rail-dsps",
+    "astro-sedpy",
+    "matplotlib",
+    "seaborn"
 ]
 
 # On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
@@ -49,7 +53,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
-write_to = "src/rail/dsps_fors2_pz/_version.py"
+write_to = "src/rail/shire/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = [
@@ -82,9 +86,14 @@ disable = [
     "unreachable",
     "unspecified-encoding",
     "no-member",
-    "not-callable"
+    "not-callable",
+    "trailing-whitespace",
+    "too-many-instance-attributes",
+    "relative-beyond-top-level",
+    "too-many-lines",
+    "cell-var-from-loop"
 ]
 max-line-length = 200
-max-locals = 50
+max-locals = 100
 max-branches = 25
 max-public-methods = 50

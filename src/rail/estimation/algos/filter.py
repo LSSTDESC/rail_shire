@@ -2,12 +2,14 @@
 
 import os
 
-# import sedpy
 from collections import namedtuple
 
 import jax.numpy as jnp
 import numpy as np
 from jax import jit
+from sedpy import observate
+from tqdm import tqdm
+from interpax import interp1d
 
 try:
     from jax.numpy import trapezoid
@@ -20,19 +22,78 @@ except ImportError:
 lightspeed = 2.998e18  # AA/s
 ab_gnu = 3.631e-20  # AB reference spctrum in erg/s/cm^2/Hz
 
-sedpyFilter = namedtuple("sedpyFilter", ["name", "wavelengths", "transmission"])
+sedpyFilter = namedtuple("sedpyFilter", ["name", "wavelength", "transmission"])
 
 # NUV
-_wls = np.arange(1000.0, 3000.0, 1.0)
-nuv_transm = np.zeros_like(_wls)
-nuv_transm[(_wls >= 2100.0) * (_wls <= 2500.0)] = 1.0
-NUV_filt = sedpyFilter(98, _wls, nuv_transm)
+_wlsnuv = np.arange(1000.0, 3000.0, 1.0)
+nuv_transm = np.zeros_like(_wlsnuv)
+nuv_transm[(_wlsnuv >= 2100.0) * (_wlsnuv <= 2500.0)] = 1.0
+NUV_filt = sedpyFilter(98, _wlsnuv, nuv_transm)
 
 # NIR
-_wls = np.arange(20000.0, 25000.0, 1.0)
-nir_transm = np.zeros_like(_wls)
-nir_transm[(_wls >= 21000.0) * (_wls <= 23000.0)] = 1.0
-NIR_filt = sedpyFilter(99, _wls, nir_transm)
+_wlsnir = np.arange(20000.0, 25000.0, 1.0)
+nir_transm = np.zeros_like(_wlsnir)
+nir_transm[(_wlsnir >= 21000.0) * (_wlsnir <= 23000.0)] = 1.0
+NIR_filt = sedpyFilter(99, _wlsnir, nir_transm)
+
+# D4000b
+_wlsd4k = np.arange(3700.0, 4300.0, 1.0)
+d4b_transm = np.zeros_like(_wlsd4k)
+d4b_transm[(_wlsd4k >= 3850.0) * (_wlsd4k <= 3950.0)] = 1.0
+D4000b_filt = sedpyFilter(96, _wlsd4k, d4b_transm)
+
+# D4000r
+d4r_transm = np.zeros_like(_wlsd4k)
+d4r_transm[(_wlsd4k >= 4000.0) * (_wlsd4k <= 4100.0)] = 1.0
+D4000r_filt = sedpyFilter(97, _wlsd4k, d4r_transm)
+
+
+def get_2lists(filter_list):
+    """get_2lists Returns the wavelengths and transmissions of filters in a list of sedpyFilter objects as a 2-tuple :
+    `X=([wavelengths], [transmissions])`
+
+    :param filter_list: list of sedpyFilter objects
+    :type filter_list: list or array-like
+    :return: 2-tuple (list of wavelengths, list of transmissions)
+    :rtype: tuple of lists
+    """
+    transms = [filt.transmission for filt in filter_list]
+    waves = [filt.wavelength for filt in filter_list]
+    return (waves, transms)
+
+
+def get_sedpy(filter_dict, wls, data_path="."):
+    filts_tup = []
+    val_sedpy = observate.list_available_filters()
+    print("Loading filters:")
+    for _if, (fnam, fdir) in tqdm(enumerate(filter_dict.items()), total=len(filter_dict)):
+        if fdir == "" or fdir is None:
+            assert fnam in val_sedpy, f"Filter {_if} ({fnam}) is not available.\
+                \nPlease provide path to an ASCII file with transmission table or use one of : {val_sedpy}."
+            _filt = observate.Filter(fnam)
+        else:
+            fdir = os.path.abspath(
+                os.path.join(
+                    data_path,
+                    "FILTER",
+                    fdir
+                )
+            )
+            _filt = observate.Filter(fnam, directory=fdir)
+        filts_tup.append(_filt)
+
+    transm_arr = jnp.array(
+        [
+            interp1d(
+                wls,
+                _f.wavelength,
+                _f.transmission,
+                method="akima",
+                extrap=0.0
+            ) for _f in filts_tup
+        ]
+    )
+    return transm_arr
 
 
 def sort(wl, trans):
@@ -324,21 +385,6 @@ def ab_mag(filtwave, filt_trans, sourcewave, sourceflux):
     ab_zero_counts = get_properties(filtwave, filt_trans)
     counts = obj_counts_hires(filtwave, filt_trans, sourcewave, sourceflux)
     return -2.5 * jnp.log10(counts / ab_zero_counts)
-
-
-def get_2lists(filter_list):
-    """get_2lists Returns the wavelengths and transmissions of filters in a list of sedpyFilter objects as a 2-tuple :
-    `X=([wavelengths], [transmissions])`
-
-    :param filter_list: list of sedpyFilter objects
-    :type filter_list: list or array-like
-    :return: 2-tuple (list of wavelengths, list of transmissions)
-    :rtype: tuple of lists
-    """
-    transms = [filt.transmission for filt in filter_list]
-    waves = [filt.wavelengths for filt in filter_list]
-    return (waves, transms)
-
 
 '''
 @jit

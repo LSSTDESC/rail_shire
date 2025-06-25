@@ -420,13 +420,34 @@ def nz_prior_params(nuvk):
 
 
 @jit
-def nz_prior_core(z, imag, alpt0, zot, kt, pcal, ktf_m, ft_m):
+def nz_prior_fracs(imag, m0, ktf_m, ft_m):
+    kk = imag-m0
+    # Ratio for each type
+    rappSum = jnp.sum(ft*jnp.exp(-ktf*kk))
+    rapp = ft_m*jnp.exp(-ktf_m*kk)
+    return rapp/rappSum
+
+
+@jit
+def dndz_prior(z, imag, m0, alpt0, zot, kt, pcal):
+    kk = imag-m0
+    zmax = zot + kt*kk
+    pz = jnp.power(z, alpt0) * jnp.exp( -jnp.power( (z/zmax), alpt0 ) )
+    # Normalisation of the probability function
+    _pcal = jnp.power(zot + kt*kk, alpt0+1) / alpt0*pcal
+    return pz/_pcal
+
+
+@jit
+def nz_prior_core(z, imag, m0, alpt0, zot, kt, pcal, ktf_m, ft_m):
     """nz_prior_core Computes the n(z) prior value in function of input parameters, as done in LEPHARE for the COSMOS2020 catalog, from VVDS data.
 
     :param z: Redshift at which the prior is evaluated
     :type z: float
     :param imag: AB-magnitude in i band at which the prior is evaluated
     :type imag: float
+    :param m0: AB-magnitude in i band at which the prior is evaluated
+    :type m0: float
     :param alpt0: alpt0 prior parameter value
     :type alpt0: float
     :param zot: zot prior parameter value
@@ -442,29 +463,9 @@ def nz_prior_core(z, imag, alpt0, zot, kt, pcal, ktf_m, ft_m):
     :return: Prior probability density at z, i_mag for the given galaxy SED template.
     :rtype: float
     """
-    # kk = imag-20.
-    # zmax = zot + kt*(imag-20.)
-    # pz = jnp.power(z,alpt0)*jnp.exp(-jnp.power((z/(zot + kt*(imag-20.))),alpt0))
-
-    # Ratio for each type
-    # rappSum = jnp.sum(ft*jnp.exp(-ktf*(imag-20.)))
-    # rapp = ft_m*jnp.exp(-ktf_m*(imag-20.))
-
-    # Normalisation of the probability function
-    # _pcal=jnp.power(zot + kt*(imag-20.),alpt0+1)/alpt0*pcal
-
     # Final value
-    # val = pz/_pcal * rapp/rappSum
-    return (
-        (jnp.power(z, alpt0) * jnp.exp(-jnp.power((z / (zot + kt * (imag - 20.0))), alpt0)))
-        / (jnp.power(zot + kt * (imag - 20.0), alpt0 + 1) / alpt0 * pcal)
-        * (ft_m * jnp.exp(-ktf_m * (imag - 20.0)))
-        / (jnp.sum(ft * jnp.exp(-ktf * (imag - 20.0))))
-    )
-    # if not jnp.isfinite(val):
-    #    val = 1.
-    # return (val-1.)*jnp.isfinite(val).astype(float)+1.
-
+    val = dndz_prior(z, imag, m0, alpt0, zot, kt, pcal) * nz_prior_fracs(imag, m0, ktf_m, ft_m)
+    return val
 
 """E(B-V) prior not in use
 ebv_prior_file = os.path.join(DATALOC, 'NoType_NoLaw_ebv_prior_dataframe_fromFORS2.pkl') #'NoType_ebv_prior_dataframe_fromFORS2.pkl'  #'BothExt_ebv_prior_dataframe_fromFORS2.pkl'

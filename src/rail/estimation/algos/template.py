@@ -8,10 +8,11 @@ Created on Thu Aug 1 12:59:33 2024
 @author: joseph
 """
 
-from collections import namedtuple
 from functools import partial
 
 import jax
+import pandas as pd
+import numpy as np
 from jax import jit, vmap
 from jax.tree_util import tree_map
 from jax import numpy as jnp
@@ -20,6 +21,7 @@ from diffmah.defaults import DiffmahParams
 from diffstar import calc_sfh_singlegal  # sfh_singlegal
 from diffstar.defaults import DiffstarUParams  # , DEFAULT_Q_PARAMS
 from rail.dsps import calc_obs_mag, calc_rest_mag, DEFAULT_COSMOLOGY, age_at_z
+from dsps.cosmology import age_at_z0
 from dsps.dust.att_curves import _frac_transmission_from_k_lambda, sbl18_k_lambda
 from interpax import interp1d
 try:
@@ -29,82 +31,58 @@ except ImportError:
         from jax.scipy.integrate import trapezoid
     except ImportError:
         from jax.numpy import trapz as trapezoid
-from astropy import constants as const
 
 from .met_weights_age_dep import calc_rest_sed_sfh_table_lognormal_mdf_agedep
+from .io_utils import istuple
+from .analysis import C_KMS, lsunPerHz_to_flam_noU, _DUMMY_PARS
+from .filter import NUV_filt, NIR_filt, D4000b_filt, D4000r_filt
 
-TODAY_GYR = 13.8
+jax.config.update("jax_enable_x64", True)
+
+TODAY_GYR = age_at_z0(*DEFAULT_COSMOLOGY)  # 13.8
 T_ARR = jnp.linspace(0.1, TODAY_GYR, 100)
-C_KMS = (const.c).to("km/s").value  # km/s
-
-BaseTemplate = namedtuple("BaseTemplate", ["name", "flux", "z_sps"])
-SPS_Templates = namedtuple("SPS_Templates", ["name", "redshift", "z_grid", "i_mag", "colors", "nuvk"])
 
 
 @jit
 def mean_sfr(params):
     """Model of the SFR
 
-    :param params: Fitted parameter dictionnary
-    :type params: float as a dictionnary
+    :param params: Fitted parameters array
+    :type params: array of floats
 
     :return: array of the star formation rate
-    :rtype: float
+    :rtype: array
 
     """
     # decode the parameters
-    MAH_lgmO = params["MAH_lgmO"]
-    MAH_logtc = params["MAH_logtc"]  # DEFAULT_MAH_PARAMS[1]
-    MAH_early_index = params["MAH_early_index"]  # DEFAULT_MAH_PARAMS[2]
-    MAH_late_index = params["MAH_late_index"]
-    list_param_mah = [MAH_lgmO, MAH_logtc, MAH_early_index, MAH_late_index]
-
-    MS_lgmcrit = params["MS_lgmcrit"]
-    MS_lgy_at_mcrit = params["MS_lgy_at_mcrit"]  # DEFAULT_MS_PARAMS[1]
-    MS_indx_lo = params["MS_indx_lo"]
-    MS_indx_hi = params["MS_indx_hi"]
-    MS_tau_dep = params["MS_tau_dep"]  # DEFAULT_MS_PARAMS[4]
-    list_param_ms = [MS_lgmcrit, MS_lgy_at_mcrit, MS_indx_lo, MS_indx_hi, MS_tau_dep]
-
-    Q_lg_qt = params["Q_lg_qt"]
-    Q_qlglgdt = params["Q_qlglgdt"]
-    Q_lg_drop = params["Q_lg_drop"]
-    Q_lg_rejuv = params["Q_lg_rejuv"]
-    list_param_q = [Q_lg_qt, Q_qlglgdt, Q_lg_drop, Q_lg_rejuv]
+    param_mah = params[:4]
+    param_ms = params[4:9]
+    param_q = params[9:13]
 
     # compute SFR
-    tup_param_sfh = DiffstarUParams(tuple(list_param_ms), tuple(list_param_q))
-    tup_param_mah = DiffmahParams(*list_param_mah)
-
-    # tarr = np.linspace(0.1, TODAY_GYR, 100)
-    # sfh_gal = sfh_singlegal(tarr, list_param_mah , list_param_ms, list_param_q,\
-    #                        ms_param_type="unbounded", q_param_type="unbounded"\
-    #                       )
+    tup_param_sfh = DiffstarUParams(param_ms, param_q)
+    tup_param_mah = DiffmahParams(*param_mah)
 
     sfh_gal = calc_sfh_singlegal(tup_param_sfh, tup_param_mah, T_ARR)
-
-    # clear sfh in future
-    # sfh_gal = jnp.where(tarr<t_obs, sfh_gal, 0)
 
     return sfh_gal
 
 
+vmap_mean_sfr = vmap(mean_sfr)
+
+
 @jit
 def ssp_spectrum_fromparam(params, z_obs, ssp_data):
-    """Return the SED of SSP DSPS with original wavelength range wihout and with dust
+    """ssp_spectrum_fromparam _summary_
 
-    :param params: parameters for the fit
-    :type params: dictionnary of parameters
-
-    :param z_obs: redshift at which the model SSP should be calculated
-    :type z_obs: float
-
-    :param ssp_data: SSP library as loaded from DSPS
-    :type ssp_data: namedtuple
-
-    :return: the wavelength and the spectrum with dust and no dust
-    :rtype: float
-
+    :param params: _description_
+    :type params: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
     """
     # compute the SFR
     # need age of universe when the light was emitted
@@ -113,9 +91,9 @@ def ssp_spectrum_fromparam(params, z_obs, ssp_data):
 
     gal_sfr_table = mean_sfr(params)
 
-    # age-dependant metallicity
-    gal_lgmet_young = 2.0  # log10(Z)
-    gal_lgmet_old = -3.0  # params["LGMET_OLD"] # log10(Z)
+    # age-dependant metallicity, log10(Z)
+    gal_lgmet_young = params.at[16].get()  # 2.0
+    gal_lgmet_old = params.at[17].get()  # -3.0  # params["LGMET_OLD"]
     gal_lgmet_scatter = 0.2  # params["LGMETSCATTER"] # lognormal scatter in the metallicity distribution function
 
     # compute the SED_info object
@@ -123,9 +101,9 @@ def ssp_spectrum_fromparam(params, z_obs, ssp_data):
         T_ARR, gal_sfr_table, gal_lgmet_young, gal_lgmet_old, gal_lgmet_scatter, ssp_data.ssp_lgmet, ssp_data.ssp_lg_age_gyr, ssp_data.ssp_flux, t_obs
     )
     # dust attenuation parameters
-    Av = params["AV"]
-    uv_bump = params["UV_BUMP"]
-    plaw_slope = params["PLAW_SLOPE"]
+    Av = params.at[13].get()
+    uv_bump = params.at[14].get()
+    plaw_slope = params.at[15].get()
     # list_param_dust = [Av, uv_bump, plaw_slope]
 
     # compute dust attenuation
@@ -138,102 +116,190 @@ def ssp_spectrum_fromparam(params, z_obs, ssp_data):
     return ssp_data.ssp_wave, sed_info.rest_sed, sed_attenuated
 
 
-@partial(vmap, in_axes=(None, None, 0, 0, None))
-def _calc_mag(ssp_wls, sed_fnu, filt_wls, filt_transm, z_obs):
-    return calc_obs_mag(ssp_wls, sed_fnu, filt_wls, filt_transm, z_obs, *DEFAULT_COSMOLOGY)
-
-
-@jit
-def mean_mags(X, params, z_obs, ssp_data):
-    """Return the photometric magnitudes for the given filters transmission
-    in X : predict the magnitudes in Filters
-
-    :param X: Tuple of filters to be used (Galex, SDSS, Vircam)
-    :type X: a 2-tuple of lists (one element is a list of wavelengths and the other is a list of corresponding transmissions - each element of these lists corresponds to a filter).
-
-    :param params: Model parameters
-    :type params: Dictionnary of parameters
-
-    :param z_obs: redshift of the observations
-    :type z_obs: float
-
-    :param ssp_data: SSP library as loaded from DSPS
-    :type ssp_data: namedtuple
-
-    :return: array the predicted magnitude for the SED spectrum model represented by its parameters.
-    :rtype: float
-
-    """
-
-    # get the restframe spectra without and with dust attenuation
-    ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
-
-    # decode the two lists
-    list_wls_filters = X[0]
-    list_transm_filters = X[1]
-
-    mags_predictions = jax.tree_map(lambda x, y: calc_obs_mag(ssp_wave, sed_attenuated, x, y, z_obs, *DEFAULT_COSMOLOGY), list_wls_filters, list_transm_filters)
-
-    mags_predictions = jnp.array(mags_predictions)
-
-    return mags_predictions
-
-
-@jit
-def mean_colors(X, params, z_obs, ssp_data):
-    """mean_colors returns the photometric magnitudes for the given filters transmission in X : predict the magnitudes in filters
-
-    :param X: Tuple of filters to be used (Galex, SDSS, Vircam)
-    :type X: a 2-tuple of lists (one element is a list of wavelengths and the other is a list of corresponding transmissions - each element of these lists corresponds to a filter).
-
-    :param params: Model parameters
-    :type params: Dictionnary of parameters
-
-    :param z_obs: redshift of the observations
-    :type z_obs: float
-
-    :param ssp_data: SSP library as loaded from DSPS
-    :type ssp_data: namedtuple
-
-    :return: array the predicted magnitude for the SED spectrum model represented by its parameters.
-    :rtype: float
-    """
-    mags = mean_mags(X, params, z_obs, ssp_data)
-    return mags[:-1] - mags[1:]
-
-
 @jit
 def mean_spectrum(wls, params, z_obs, ssp_data):
-    """Return the Model of SSP spectrum including Dust at the wavelength wls
+    """mean_spectrum _summary_
 
-    :param wls: wavelengths of the spectrum in rest frame
-    :type wls: float
-
-    :param params: parameters for the fit
-    :type params: dictionnary of parameters
-
-    :param z_obs: redshift at which the model SSP should be calculated
-    :type z_obs: float
-
-    :param ssp_data: SSP library as loaded from DSPS
-    :type ssp_data: namedtuple
-
-    :return: the spectrum
-    :rtype: float
-
+    :param wls: _description_
+    :type wls: _type_
+    :param params: _description_
+    :type params: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
     """
-
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
 
     # interpolate with interpax which is differentiable
     # Fobs = jnp.interp(wls, ssp_data.ssp_wave, sed_attenuated)
-    Fobs = interp1d(wls, ssp_wave, sed_attenuated, method="cubic")
+    Fobs = interp1d(wls, ssp_wave, sed_attenuated, method="akima", extrap=False)
 
     return Fobs
 
 
-@partial(vmap, in_axes=(None, None, 0))
+vmap_mean_spectrum_zo = vmap(mean_spectrum, in_axes=(None, None, 0, None))
+vmap_mean_spectrum = vmap(vmap_mean_spectrum_zo, in_axes=(None, 0, None, None))
+
+
+@jit
+def mean_spectrum_nodust(wls, params, z_obs, ssp_data):
+    """mean_spectrum_nodust _summary_
+
+    :param wls: _description_
+    :type wls: _type_
+    :param params: _description_
+    :type params: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    # get the restframe spectra without and with dust attenuation
+    ssp_wave, rest_sed, _ = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+
+    # interpolate with interpax which is differentiable
+    # Fobs = jnp.interp(wls, ssp_data.ssp_wave, sed_attenuated)
+    Fobs = interp1d(wls, ssp_wave, rest_sed, method="akima", extrap=False)
+
+    return Fobs
+
+
+vmap_mean_spectrum_nodust_zo = vmap(mean_spectrum_nodust, in_axes=(None, None, 0, None))
+vmap_mean_spectrum_nodust = vmap(vmap_mean_spectrum_nodust_zo, in_axes=(None, 0, None, None))
+
+
+@partial(vmap, in_axes=(None, None, None, 0, None))
+def vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs):
+    """vmap_calc_obs_mag _summary_
+
+    :param ssp_wave: _description_
+    :type ssp_wave: _type_
+    :param sed_attenuated: _description_
+    :type sed_attenuated: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param filt_trans_arr: _description_
+    :type filt_trans_arr: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    return calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs, *DEFAULT_COSMOLOGY)
+
+
+@partial(vmap, in_axes=(None, None, None, 0))
+def vmap_calc_rest_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr):
+    """vmap_calc_obs_mag _summary_
+
+    :param ssp_wave: _description_
+    :type ssp_wave: _type_
+    :param sed_attenuated: _description_
+    :type sed_attenuated: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param filt_trans_arr: _description_
+    :type filt_trans_arr: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    return calc_rest_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr)
+
+
+@jit
+def mean_mags(params, wls, filt_trans_arr, z_obs, ssp_data):
+    """mean_mags _summary_
+
+    :param params: _description_
+    :type params: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param filt_trans_arr: _description_
+    :type filt_trans_arr: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    # get the restframe spectra without and with dust attenuation
+    ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+
+    mags_predictions = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
+    # mags_predictions = tree_map(
+    #    lambda trans : calc_obs_mag(
+    #        ssp_wave,
+    #        sed_attenuated,
+    #        wls,
+    #        trans,
+    #        z_obs,
+    #        *DEFAULT_COSMOLOGY
+    #    ),
+    #    tuple(t for t in filt_trans_arr)
+    # )
+
+    return jnp.array(mags_predictions)
+
+
+@jit
+def mean_colors(params, wls, filt_trans_arr, z_obs, ssp_data):
+    """mean_colors _summary_
+
+    :param params: _description_
+    :type params: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param filt_trans_arr: _description_
+    :type filt_trans_arr: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    mags = mean_mags(params, wls, filt_trans_arr, z_obs, ssp_data)
+    return mags[:-1] - mags[1:]
+
+
+vmap_mean_mags = vmap(mean_mags, in_axes=(0, None, None, 0, None))
+
+vmap_mean_colors = vmap(mean_colors, in_axes=(0, None, None, 0, None))
+
+
+@jit
+def mean_icolors(params, wls, filt_trans_arr, z_obs, ssp_data, iband_num):
+    """mean_icolors _summary_
+
+    :param params: _description_
+    :type params: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param filt_trans_arr: _description_
+    :type filt_trans_arr: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    mags = mean_mags(params, wls, filt_trans_arr, z_obs, ssp_data)
+    imag = mags.at[iband_num].get()
+    return mags - imag
+
+
+vmap_mean_icolors = vmap(mean_icolors, in_axes=(0, None, None, 0, None, None))
+
+
+@jit
 def calc_eqw(sur_wls, sur_spec, lin):
     r"""
     Computes the equivalent width of the specified spectral line.
@@ -254,169 +320,908 @@ def calc_eqw(sur_wls, sur_spec, lin):
     float
         Value of the nequivalent width of spectral line at $\lambda=$`lin`.
     """
-    line_wid = lin * 300 / C_KMS / 2
-    cont_wid = lin * 1500 / C_KMS / 2
-    nancont = jnp.where((sur_wls > lin - cont_wid) * (sur_wls < lin - line_wid) + (sur_wls > lin + line_wid) * (sur_wls < lin + cont_wid), sur_spec, jnp.nan)
+    line_wid = lin * 400 / C_KMS / 2
+    cont_wid = lin * 15000 / C_KMS / 2
+    sur_flam = lsunPerHz_to_flam_noU(sur_wls, sur_spec, 0.001)
+    nancont = jnp.where(jnp.logical_or(jnp.logical_and(sur_wls > lin - cont_wid, sur_wls < lin - line_wid), jnp.logical_and(sur_wls > lin + line_wid, sur_wls < lin + cont_wid)), sur_flam, jnp.nan)
     height = jnp.nanmean(nancont)
-    vals = jnp.where((sur_wls > lin - line_wid) * (sur_wls < lin + line_wid), sur_spec / height - 1.0, 0.0)
+    vals = jnp.where(jnp.logical_and(sur_wls > lin - line_wid, sur_wls < lin + line_wid), sur_flam / height - 1.0, 0.0)
     ew = trapezoid(vals, x=sur_wls)
     return ew
 
 
+vmap_calc_eqw = vmap(calc_eqw, in_axes=(None, None, 0))
+vmap_eqw_sed = vmap(vmap_calc_eqw, in_axes=(None, 0, None))
+
+
 @jit
-def templ_mags(X, params, z_obs, ssp_data):
+def templ_mags(params, wls, filt_trans_arr, z_obs, av, ssp_data):
     """Return the photometric magnitudes for the given filters transmission
     in X : predict the magnitudes in Filters
-
-    :param X: Tuple of filters to be used (Galex, SDSS, Vircam)
-    :type X: a 2-tuple of lists (one element is a list of wavelengths and the other is a list of corresponding transmissions - each element of these lists corresponds to a filter).
-
     :param params: Model parameters
     :type params: Dictionnary of parameters
-
-    :param z_obs: redshift of the observations
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
     :type z_obs: float
-
+    :param av: Attenuation parameter in dust law
+    :type av: float
     :param ssp_data: SSP library
     :type ssp_data: namedtuple
 
     :return: array the predicted magnitude for the SED spectrum model represented by its parameters.
-    :rtype: float
-
+    :rtype: 1D JAX-array of floats of length (nb bands+2)
     """
-
+    _pars = params.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(_pars, z_obs, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
+    _nuvk = jnp.array(
+        [
+            calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
+        ]
+    )
 
-    # decode the two lists
-    list_wls_filters = X[0]
-    list_transm_filters = X[1]
-
-    obs_mags = tree_map(lambda x, y: calc_obs_mag(ssp_wave, sed_attenuated, x, y, z_obs, *DEFAULT_COSMOLOGY), list_wls_filters[:-2], list_transm_filters[:-2])
-    rest_mags = tree_map(lambda x, y: calc_rest_mag(ssp_wave, sed_attenuated, x, y), list_wls_filters[-2:], list_transm_filters[-2:])
-
-    mags_predictions = jnp.concatenate((jnp.array(obs_mags), jnp.array(rest_mags)))
+    mags_predictions = jnp.concatenate((_mags, _nuvk))
 
     return mags_predictions
 
 
-v_mags = vmap(templ_mags, in_axes=(None, None, 0, None))
+vmap_mags_av = vmap(templ_mags, in_axes=(None, None, None, None, 0, None))
+vmap_mags_zobs = vmap(vmap_mags_av, in_axes=(None, None, None, 0, None, None))
+vmap_mags_pars = vmap(vmap_mags_zobs, in_axes=(0, None, None, None, None, None))
 
 
-# @jit
-def calc_nuvk(wls, params_dict, zobs, ssp_data):
-    """calc_nuvk Computes the theoretical emitted NUV-IR color index of a reference galaxy.
+def templ_clrs_nuvk(params, wls, filt_trans_arr, z_obs, av, ssp_data):
+    """Return the photometric color indices for the given filters transmission
+    :param params: Model parameters
+    :type params: Dictionnary of parameters
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
+    :type z_obs: float
+    :param av: Attenuation parameter in dust law
+    :type av: float
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
 
-    :param wls: Wavelengths
-    :type wls: array
-    :param params_dict: DSPS input parameters to compute the restframe NUV and NIR photometry.
-    :type params_dict: dict
-    :param zobs: Redshift value
-    :type zobs: float
-    :return: NUV-NIR color index
-    :rtype: float
+    :return: tuple of arrays the predicted colors for the SED spectrum model represented by its parameters.
+    :rtype: tuple(array of floats of length (nb bands-1), float)
     """
-    from .filter import NIR_filt, NUV_filt, ab_mag
-
-    rest_sed = mean_spectrum(wls, params_dict, zobs, ssp_data)
-    nuv = ab_mag(NUV_filt.wavelengths, NUV_filt.transmission, wls, rest_sed)
-    nir = ab_mag(NIR_filt.wavelengths, NIR_filt.transmission, wls, rest_sed)
-    return nuv - nir
+    _mags = templ_mags(params, wls, filt_trans_arr, z_obs, av, ssp_data)
+    return _mags[:-3] - _mags[1:-2], _mags[-2] - _mags[-1]
 
 
-v_nuvk = vmap(calc_nuvk, in_axes=(None, None, 0, None))
+vmap_clrs_av = vmap(templ_clrs_nuvk, in_axes=(None, None, None, None, 0, None))
+vmap_clrs_zobs = vmap(vmap_clrs_av, in_axes=(None, None, None, 0, None, None))
+vmap_clrs_pars = vmap(vmap_clrs_zobs, in_axes=(0, None, None, None, None, None))
 
 
-def make_sps_templates(params_dict, filt_tup, redz, ssp_data, id_imag=3):
+def templ_iclrs_nuvk(params, wls, filt_trans_arr, z_obs, av, ssp_data, id_imag):
+    """Return the photometric color indices for the given filters transmission
+    :param params: Model parameters
+    :type params: Dictionnary of parameters
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
+    :type z_obs: float
+    :param av: Attenuation parameter in dust law
+    :type av: float
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+    :param id_imag: index of reference band (usually i). For 6-band LSST : u=0 g=1 r=2 i=3 z=4 y=5, defaults to 3
+    :type id_imag: int, optional
+
+    :return: tuple of arrays the predicted colors for the SED spectrum model represented by its parameters.
+    :rtype: tuple(array of floats of length (nb bands), float)
+    """
+    _mags = templ_mags(params, wls, filt_trans_arr, z_obs, av, ssp_data)
+    return _mags[:-2] - _mags[id_imag], _mags[-2] - _mags[-1]
+
+
+vmap_iclrs_av = vmap(templ_iclrs_nuvk, in_axes=(None, None, None, None, 0, None, None))
+vmap_iclrs_zobs = vmap(vmap_iclrs_av, in_axes=(None, None, None, 0, None, None, None))
+vmap_iclrs_pars = vmap(vmap_iclrs_zobs, in_axes=(0, None, None, None, None, None, None))
+
+
+@jit
+def calc_nuvk(pars_arr, wls, z_obs, ssp_data):
+    """calc_nuvk _summary_
+
+    :param pars_arr: _description_
+    :type pars_arr: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    sed = mean_spectrum_nodust(wls, pars_arr, z_obs, ssp_data)
+    _nuvk = jnp.array(
+        [
+            calc_rest_mag(wls, sed, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(wls, sed, NIR_filt.wavelength, NIR_filt.transmission)
+        ]
+    )
+
+    return _nuvk[0]-_nuvk[1]
+
+
+v_nuvk_zo = vmap(calc_nuvk, in_axes=(None, None, 0, None))
+v_nuvk = vmap(v_nuvk_zo, in_axes=(0, None, None, None))
+
+
+@jit
+def calc_nuvk_dusty(pars_arr, wls, z_obs, ssp_data):
+    """calc_nuvk_dusty _summary_
+
+    :param pars_arr: _description_
+    :type pars_arr: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    sed = mean_spectrum(wls, pars_arr, z_obs, ssp_data)
+    _nuvk = jnp.array(
+        [
+            calc_rest_mag(wls, sed, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(wls, sed, NIR_filt.wavelength, NIR_filt.transmission)
+        ]
+    )
+
+    return _nuvk[0]-_nuvk[1]
+
+
+v_nuvk_zo_dusty = vmap(calc_nuvk_dusty, in_axes=(None, None, 0, None))
+v_nuvk_dusty = vmap(v_nuvk_zo_dusty, in_axes=(0, None, None, None))
+
+
+@jit
+def calc_d4000n(pars_arr, wls, z_obs, ssp_data):
+    """calc_d4000n _summary_
+
+    :param pars_arr: _description_
+    :type pars_arr: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    sed = mean_spectrum_nodust(wls, pars_arr, z_obs, ssp_data)
+    d4000 = jnp.array(
+        [
+            calc_rest_mag(wls, sed, D4000b_filt.wavelength, D4000b_filt.transmission),
+            calc_rest_mag(wls, sed, D4000r_filt.wavelength, D4000r_filt.transmission)
+        ]
+    )
+
+    return d4000[0]-d4000[1]
+
+
+v_d4000n_zo = vmap(calc_d4000n, in_axes=(None, None, 0, None))
+v_d4000n = vmap(v_d4000n_zo, in_axes=(0, None, None, None))
+
+
+@jit
+def calc_d4000n_dusty(pars_arr, wls, z_obs, ssp_data):
+    """calc_d4000n_dusty _summary_
+
+    :param pars_arr: _description_
+    :type pars_arr: _type_
+    :param wls: _description_
+    :type wls: _type_
+    :param z_obs: _description_
+    :type z_obs: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :return: _description_
+    :rtype: _type_
+    """
+    sed = mean_spectrum(wls, pars_arr, z_obs, ssp_data)
+    d4000 = jnp.array(
+        [
+            calc_rest_mag(wls, sed, D4000b_filt.wavelength, D4000b_filt.transmission),
+            calc_rest_mag(wls, sed, D4000r_filt.wavelength, D4000r_filt.transmission)
+        ]
+    )
+
+    return d4000[0]-d4000[1]
+
+
+v_d4000n_zo_dusty = vmap(calc_d4000n_dusty, in_axes=(None, None, 0, None))
+v_d4000n_dusty = vmap(v_d4000n_zo_dusty, in_axes=(0, None, None, None))
+
+
+def get_colors_templates(params, wls, z_obs, transm_arr, ssp_data):
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, transm_arr, z_obs)
+    return _mags[:-1]-_mags[1:]
+
+vmap_cols_zo = vmap(get_colors_templates, in_axes=(None, None, 0, None, None))
+vmap_cols_templ = vmap(vmap_cols_zo, in_axes=(0, None, None, None, None))
+
+
+def get_colors_templates_nodust(params, wls, z_obs, transm_arr, ssp_data):
+    ssp_wave, sed, _ = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed, wls, transm_arr, z_obs)
+    return _mags[:-1]-_mags[1:]
+
+vmap_cols_zo_nodust = vmap(get_colors_templates_nodust, in_axes=(None, None, 0, None, None))
+vmap_cols_templ_nodust = vmap(vmap_cols_zo_nodust, in_axes=(0, None, None, None, None))
+
+def get_colors_templates_leg(params, wls, z_obs, z_ref, transm_arr, ssp_data):
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_ref, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, transm_arr, z_obs)
+    return _mags[:-1]-_mags[1:]
+
+vmap_cols_zo_leg = vmap(get_colors_templates_leg, in_axes=(None, None, 0, None, None, None))
+vmap_cols_templ_leg = vmap(vmap_cols_zo_leg, in_axes=(0, None, None, 0, None, None))
+
+
+def get_colors_templates_nodust_leg(params, wls, z_obs, z_ref, transm_arr, ssp_data):
+    ssp_wave, sed, _ = ssp_spectrum_fromparam(params, z_ref, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed, wls, transm_arr, z_obs)
+    return _mags[:-1]-_mags[1:]
+
+vmap_cols_zo_nodust_leg = vmap(get_colors_templates_nodust_leg, in_axes=(None, None, 0, None, None, None))
+vmap_cols_templ_nodust_leg = vmap(vmap_cols_zo_nodust_leg, in_axes=(0, None, None, 0, None, None))
+
+def make_sps_templates(params_arr, wls, transm_arr, redz_arr, av_arr, ssp_data):
     """make_sps_templates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
 
-    :param params_dict: DSPS input parameters
-    :type params_dict: dict
-    :param filt_tup: Filters in which to compute the photometry of the templates, given as a tuple of two arrays : one for wavelengths, one for transmissions.
-    :type filt_tup: tuple of arrays
-    :param redz: redshift grid on which to compute the templates photometry
-    :type redz: array
+    :param params_arr: Model parameters as output by DSPS
+    :type params_arr: Array of float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: JAX-array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param redz_arr: redshift grid on which to compute the templates photometry
+    :type redz_arr: array
+    :param av_arr: Attenuation grid on which to compute the templates photometry
+    :type av_arr: array
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+    :return: Templates for photoZ estimation, accounting for the Star Formation History up to the redshift value, as estimated by DSPS
+    :rtype: Tuple of arrays of floats
+    """
+    # template_mags = vmap_mags_pars(params_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
+    # nuvk = template_mags[:, :, :, -2] - template_mags[:, :, :, -1]
+    # colors = template_mags[:, :, :, :-3] - template_mags[:, :, :, 1:-2]
+    templ_tupl = [tuple(_pars) for _pars in params_arr]
+    reslist_of_tupl = tree_map(lambda partup: vmap_clrs_zobs(jnp.array(partup), wls, transm_arr, redz_arr, av_arr, ssp_data), templ_tupl, is_leaf=istuple)
+    # colors, nuvk = vmap_clrs_pars(params_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
+    return reslist_of_tupl
+
+
+def make_sps_itemplates(params_arr, wls, transm_arr, redz_arr, av_arr, ssp_data, id_imag=3):
+    """make_sps_itemplates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
+
+    :param params_arr: Model parameters as output by DSPS
+    :type params_arr: Array of float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: JAX-array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param redz_arr: redshift grid on which to compute the templates photometry
+    :type redz_arr: array
+    :param av_arr: Attenuation grid on which to compute the templates photometry
+    :type av_arr: array
     :param ssp_data: SSP library
     :type ssp_data: namedtuple
     :param id_imag: index of reference band (usually i). For 6-band LSST : u=0 g=1 r=2 i=3 z=4 y=5, defaults to 3
     :type id_imag: int, optional
     :return: Templates for photoZ estimation, accounting for the Star Formation History up to the redshift value, as estimated by DSPS
-    :rtype: SPS_Templates object (namedtuple)
+    :rtype: Tuple of arrays of floats
     """
-    name = params_dict.pop("tag")
-    z_sps = params_dict.pop("redshift")
-    template_mags = v_mags(filt_tup, params_dict, redz, ssp_data)
-    nuvk = template_mags[:, -2] - template_mags[:, -1]
-    colors = template_mags[:, :-3] - template_mags[:, 1:-2]
-    i_mag = template_mags[:, id_imag]
-    return SPS_Templates(name, z_sps, redz, i_mag, colors, nuvk)
+    # template_mags = vmap_mags_pars(params_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
+    # i_mag = template_mags[:, :, :, id_imag]
+    # nuvk = template_mags[:, :, :, -2] - template_mags[:, :, :, -1]
+    # colors = template_mags[:, :, :, :-2] - i_mag
+    templ_tupl = [tuple(_pars) for _pars in params_arr]
+    reslist_of_tupl = tree_map(lambda partup: vmap_iclrs_zobs(jnp.array(partup), wls, transm_arr, redz_arr, av_arr, ssp_data, id_imag), templ_tupl, is_leaf=istuple)
+    # colors, nuvk = vmap_iclrs_pars(params_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data, id_imag)
+    return reslist_of_tupl
 
 
 @jit
-def templ_mags_legacy(X, params, z_ref, z_obs, ssp_data):
+def templ_mags_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data):
     """Return the photometric magnitudes for the given filters transmission
-    in X : predict the magnitudes in Filters
-
-    :param X: Tuple of filters to be used (Galex, SDSS, Vircam)
-    :type X: a 2-tuple of lists (one element is a list of wavelengths and the other is a list of corresponding transmissions - each element of these lists corresponds to a filter).
-
     :param params: Model parameters
     :type params: Dictionnary of parameters
-
     :param z_ref: redshift of the galaxy used as template
     :type z_ref: float
-
-    :param z_obs: redshift of the observations
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
     :type z_obs: float
-
+    :param av: Attenuation parameter in dust law
+    :type av: float
     :param ssp_data: SSP library
     :type ssp_data: namedtuple
 
     :return: array the predicted magnitude for the SED spectrum model represented by its parameters.
-    :rtype: float
+    :rtype: 1D JAX-array of floats of length (nb bands+2)
 
     """
-
+    _pars = params.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(params, z_ref, ssp_data)
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(_pars, z_ref, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
+    _nuvk = jnp.array(
+        [
+            calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
+        ]
+    )
 
-    # decode the two lists
-    list_wls_filters = X[0]
-    list_transm_filters = X[1]
-
-    obs_mags = tree_map(lambda x, y: calc_obs_mag(ssp_wave, sed_attenuated, x, y, z_obs, *DEFAULT_COSMOLOGY), list_wls_filters[:-2], list_transm_filters[:-2])
-    rest_mags = tree_map(lambda x, y: calc_rest_mag(ssp_wave, sed_attenuated, x, y), list_wls_filters[-2:], list_transm_filters[-2:])
-
-    mags_predictions = jnp.concatenate((jnp.array(obs_mags), jnp.array(rest_mags)))
+    mags_predictions = jnp.concatenate((_mags, _nuvk))
 
     return mags_predictions
 
 
-v_mags_legacy = vmap(templ_mags_legacy, in_axes=(None, None, None, 0, None))
+vmap_mags_av_legacy = vmap(templ_mags_legacy, in_axes=(None, None, None, None, None, 0, None))
+vmap_mags_zobs_legacy = vmap(vmap_mags_av_legacy, in_axes=(None, None, None, None, 0, None, None))
+vmap_mags_pars_legacy = vmap(vmap_mags_zobs_legacy, in_axes=(0, 0, None, None, None, None, None))
 
 
-def make_legacy_templates(params_dict, filt_tup, redz, ssp_data, id_imag=3):
-    """make_sps_templates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
-    Contrary to `make_sps_template`, this methods only shifts the restframe SED and does not reevaluate the stellar population at each redshift.
-    Mainly used for comparative studies as other existing photoZ codes such as BPZ and LEPHARE will do this and more.
+def templ_clrs_nuvk_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data):
+    """Return the photometric color indices for the given filters transmission
+    :param params: Model parameters
+    :type params: Dictionnary of parameters
+    :param z_ref: redshift of the galaxy used as template
+    :type z_ref: float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
+    :type z_obs: float
+    :param av: Attenuation parameter in dust law
+    :type av: float
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
 
-    :param params_dict: DSPS input parameters
-    :type params_dict: dict
-    :param filt_tup: Filters in which to compute the photometry of the templates, given as a tuple of two arrays : one for wavelengths, one for transmissions.
-    :type filt_tup: tuple of arrays
-    :param redz: redshift grid on which to compute the templates photometry
-    :type redz: array
+    :return: tuple of arrays the predicted colors for the SED spectrum model represented by its parameters.
+    :rtype: tuple(array of floats of length (nb bands-1), float)
+    """
+    _mags = templ_mags_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data)
+    return _mags[:-3] - _mags[1:-2], _mags[-2] - _mags[-1]
+
+
+vmap_clrs_av_legacy = vmap(templ_clrs_nuvk_legacy, in_axes=(None, None, None, None, None, 0, None))
+vmap_clrs_zobs_legacy = vmap(vmap_clrs_av_legacy, in_axes=(None, None, None, None, 0, None, None))
+vmap_clrs_pars_legacy = vmap(vmap_clrs_zobs_legacy, in_axes=(0, 0, None, None, None, None, None))
+
+
+def templ_iclrs_nuvk_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data, id_imag):
+    """Return the photometric color indices for the given filters transmission
+    :param params: Model parameters
+    :type params: Dictionnary of parameters
+    :param z_ref: redshift of the galaxy used as template
+    :type z_ref: float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
+    :type z_obs: float
+    :param av: Attenuation parameter in dust law
+    :type av: float
     :param ssp_data: SSP library
     :type ssp_data: namedtuple
     :param id_imag: index of reference band (usually i). For 6-band LSST : u=0 g=1 r=2 i=3 z=4 y=5, defaults to 3
     :type id_imag: int, optional
-    :return: Templates for photoZ estimation, NOT accounting for the Star Formation History up to the redshift value.
-    :rtype: SPS_Templates object (namedtuple)
+
+    :return: tuple of arrays the predicted colors for the SED spectrum model represented by its parameters.
+    :rtype: tuple(array of floats of length (nb bands), float)
     """
-    name = params_dict.pop("tag")
-    z_sps = params_dict.pop("redshift")
-    template_mags = v_mags_legacy(filt_tup, params_dict, z_sps, redz, ssp_data)
-    nuvk = template_mags[:, -2] - template_mags[:, -1]
-    colors = template_mags[:, :-3] - template_mags[:, 1:-2]
-    i_mag = template_mags[:, id_imag]
-    return SPS_Templates(name, z_sps, redz, i_mag, colors, nuvk)
+    _mags = templ_mags_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data)
+    return _mags[:-2] - _mags[id_imag], _mags[-2] - _mags[-1]
+
+
+vmap_iclrs_av_legacy = vmap(templ_iclrs_nuvk_legacy, in_axes=(None, None, None, None, None, 0, None, None))
+vmap_iclrs_zobs_legacy = vmap(vmap_iclrs_av_legacy, in_axes=(None, None, None, None, 0, None, None, None))
+vmap_iclrs_pars_legacy = vmap(vmap_iclrs_zobs_legacy, in_axes=(0, 0, None, None, None, None, None, None))
+
+
+def make_legacy_templates(params_arr, zref_arr, wls, transm_arr, redz_arr, av_arr, ssp_data):
+    """make_legacy_templates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
+
+    :param params_arr: Model parameters as output by DSPS
+    :type params_arr: Array of float
+    :param z_ref: array of redshift of the galaxy used as template
+    :type z_ref: JAX-array of float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: JAX-array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param redz_arr: redshift grid on which to compute the templates photometry
+    :type redz_arr: array
+    :param av_arr: Attenuation grid on which to compute the templates photometry
+    :type av_arr: array
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+    :return: Templates for photoZ estimation, accounting for the Star Formation History up to the redshift value, as estimated by DSPS
+    :rtype: Tuple of arrays of floats
+    """
+    # template_mags = vmap_mags_pars_legacy(params_arr, zref_arr, wls, transm_arr, redz_arr, av_arr, ssp_data)
+    # nuvk = template_mags[:, :, :, -2] - template_mags[:, :, :, -1]
+    # colors = template_mags[:, :, :, :-3] - template_mags[:, :, :, 1:-2]
+    templ_tupl = [tuple(_pars) + tuple([z]) for _pars, z in zip(params_arr, zref_arr, strict=True)]
+    reslist_of_tupl = tree_map(lambda partup: vmap_clrs_zobs_legacy(jnp.array(partup[:-1]), partup[-1], wls, transm_arr, redz_arr, av_arr, ssp_data), templ_tupl, is_leaf=istuple)
+    # colors, nuvk = vmap_clrs_pars_legacy(params_arr, zref_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
+    return reslist_of_tupl
+
+
+def make_legacy_itemplates(params_arr, zref_arr, wls, transm_arr, redz_arr, av_arr, ssp_data, id_imag=3):
+    """make_legacy_itemplates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
+
+    :param params_arr: Model parameters as output by DSPS
+    :type params_arr: Array of float
+    :param z_ref: array of redshift of the galaxy used as template
+    :type z_ref: JAX-array of float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: JAX-array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param redz_arr: redshift grid on which to compute the templates photometry
+    :type redz_arr: array
+    :param av_arr: Attenuation grid on which to compute the templates photometry
+    :type av_arr: array
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+    :param id_imag: index of reference band (usually i). For 6-band LSST : u=0 g=1 r=2 i=3 z=4 y=5, defaults to 3
+    :type id_imag: int, optional
+    :return: Templates for photoZ estimation, accounting for the Star Formation History up to the redshift value, as estimated by DSPS
+    :rtype: Tuple of arrays of floats
+    """
+    # template_mags = vmap_mags_pars_legacy(params_arr, zref_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
+    # i_mag = template_mags[:, :, :, id_imag]
+    # nuvk = template_mags[:, :, :, -2] - template_mags[:, :, :, -1]
+    # colors = template_mags[:, :, :, :-2] - i_mag
+    templ_tupl = [tuple(_pars) + tuple([z]) for _pars, z in zip(params_arr, zref_arr, strict=True)]
+    reslist_of_tupl = tree_map(lambda partup: vmap_iclrs_zobs_legacy(jnp.array(partup[:-1]), partup[-1], wls, transm_arr, redz_arr, av_arr, ssp_data, id_imag), templ_tupl, is_leaf=istuple)
+    # colors, nuvk = vmap_iclrs_pars_legacy(params_arr, zref_arr, wls, transm_arr, redz_arr, av_arr, ssp_data, id_imag)
+    return reslist_of_tupl
+
+def lim_HII_comp(log_oi_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII et composites : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right) < \
+    −1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163$
+    - LINERs : $−1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right) < \\log \\left(\frac{\\left[O_I\right]}{H_\alpha} \right) + 0.7$
+    - Seyferts : $−1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right)$ et $\\log \\left(\frac{\\left[O_I\right]}{H_\alpha} \right) + 0.7 <\
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right)$
+
+    Parameters
+    ----------
+    log_oi_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [OI] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII and Composites vs.
+        Seyferts and LINERs.
+    """
+    return -1.701 * log_oi_ha - 2.163
+
+
+def lim_seyf_liner(log_oi_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII et composites : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right) < \
+    −1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163$
+    - LINERs : $−1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right) < \\log \\left(\frac{\\left[O_I\right]}{H_\alpha} \right) + 0.7$
+    - Seyferts : $−1.701 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) − 2.163 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right)$ et $\\log \\left(\frac{\\left[O_I\right]}{H_\alpha} \right) + 0.7 <\
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[O_{II}\right]} \right)$
+
+    Parameters
+    ----------
+    log_oi_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [OI] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : LINERs vs. Seyferts.
+    """
+    return 1.0 * log_oi_ha + 0.7
+
+
+def Ka03_nii(log_nii_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.05} + 1.3$ (Ka03)
+    - Composites : (Ka03) $\frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.05} + 1.3 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.47} + 1.19$ (Ke01)
+
+    Parameters
+    ----------
+    log_nii_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [NII] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII vs. Composites,
+        Seyferts and LINERs.
+    """
+    return 0.61 / (log_nii_ha - 0.05) + 1.3
+
+
+def Ke01_nii(log_nii_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.05} + 1.3$ (Ka03)
+    - Composites : (Ka03) $\frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.05} + 1.3 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.61}{\\log \\left( \frac{\\left[N_{II}\right]}{H_\alpha} \right) − 0.47} + 1.19$ (Ke01)
+
+    Parameters
+    ----------
+    log_nii_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [NII] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII and Composites vs.
+        Seyferts and LINERs.
+    """
+    return 0.61 / (log_nii_ha - 0.47) + 1.19
+
+
+def Ke01_sii(log_sii_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30$ (Ke01)
+    - Seyfert : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    (Kw06) $1.89 \\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) + 0.76 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$
+    - LINER : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) > \
+    1.89 \\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) + 0.76$ (Ke06)
+
+    Parameters
+    ----------
+    log_sii_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [SII] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII vs. Seyferts and LINERs.
+    """
+    return 0.72 / (log_sii_ha - 0.32) + 1.30
+
+
+def Ke06_sii(log_sii_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \
+    \frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30$ (Ke01)
+    - Seyfert : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    (Kw06) $1.89 \\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) + 0.76 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$
+    - LINER : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) > \
+    1.89 \\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) + 0.76$ (Ke06)
+
+    Parameters
+    ----------
+    log_sii_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [SII] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : LINERs vs. Seyferts.
+    """
+    return 1.89 * log_sii_ha + 0.76
+
+
+def Ke01_oi(log_oi_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) < \frac{0.73}{\\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 0.59} + 1.33$ (Ke01)
+    - Seyfert : (Ke01) $\frac{0.73}{\\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 0.59} + 1.33 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    (Kw06) $1.18 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$
+    - LINER : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) > \
+    1.18 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 1.30$ (Ke06)
+
+    Parameters
+    ----------
+    log_oi_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [OI] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : HII vs. Seyferts + LINERs.
+    """
+    return 0.73 / (log_oi_ha + 0.59) + 1.33
+
+
+def Ke06_oi(log_oi_ha):
+    """
+    Critère de [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract):
+    - HII (star-forming) : $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) <\
+    \frac{0.73}{\\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 0.59} + 1.33$ (Ke01)
+    - Seyfert : (Ke01) $\frac{0.73}{\\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 0.59} + 1.33 <\
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    Kw06) $1.18 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$
+    - LINER : (Ke01) $\frac{0.72}{\\log \\left( \frac{\\left[S_{II}\right]}{H_\alpha} \right) − 0.32} + 1.30 < \
+    \\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right)$ et
+    $\\log \\left( \frac{ \\left[O_{III}\right]}{\\left[H_{\beta}\right]} \right) > \
+    1.18 \\log \\left( \frac{\\left[O_{I}\right]}{H_\alpha} \right) + 1.30$ (Ke06)
+
+    Parameters
+    ----------
+    log_oi_ha : float or numpy array
+        Decimal logarithm of the amplitude ratio of spectral bands [OI] and H$_\alpha$, often derived from equivalent widths.
+
+    Returns
+    -------
+    float or numpy array
+        The value that classifies galaxies into two kinds depending on whether they are below or above this limit : LINERs vs. Seyferts.
+    """
+    return 1.18 * log_oi_ha + 1.30
+
+@jit
+def bpt_rews_pars_zo(templ_pars, zobs, ssp_data):
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_seds_zo = vmap_mean_spectrum_nodust_zo(_wls, templ_pars, zobs, ssp_data)
+    rews_zo = vmap_eqw_sed(_wls, templ_seds_zo, _lines_wl)
+    return rews_zo
+
+vmap_bpt_rews = vmap(bpt_rews_pars_zo, in_axes=(0, None, None))
+
+@jit
+def bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data):
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_seds_zo = vmap_mean_spectrum_zo(_wls, templ_pars, zobs, ssp_data)
+    rews_zo = vmap_eqw_sed(_wls, templ_seds_zo, _lines_wl)
+    return rews_zo
+
+vmap_bpt_rews_dusty = vmap(bpt_rews_pars_zo_dusty, in_axes=(0, None, None))
+
+
+@jit
+def bpt_rews_pars_leg(templ_pars, zref, ssp_data):
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_seds = mean_spectrum_nodust(_wls, templ_pars, zref, ssp_data)
+    rews = vmap_calc_eqw(_wls, templ_seds, _lines_wl)
+    return rews
+
+vmap_bpt_rews_leg = vmap(bpt_rews_pars_leg, in_axes=(0, 0, None))
+
+@jit
+def bpt_rews_pars_dusty_leg(templ_pars, zref, ssp_data):
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_seds = mean_spectrum(_wls, templ_pars, zref, ssp_data)
+    rews = vmap_calc_eqw(_wls, templ_seds, _lines_wl)
+    return rews
+
+vmap_bpt_rews_dusty_leg = vmap(bpt_rews_pars_dusty_leg, in_axes=(0, 0, None))
+
+
+@jit
+def colrs_bptrews_templ_zo(templ_pars, wls, zobs, transm_arr, ssp_data):
+    t_rews = bpt_rews_pars_zo(templ_pars, zobs, ssp_data)
+    t_colors = vmap_cols_zo_nodust(templ_pars, wls, zobs, transm_arr, ssp_data)
+    t_nuvk = v_nuvk_zo(templ_pars, wls, zobs, ssp_data)
+    t_d4000n = v_d4000n_zo(templ_pars, wls, zobs, ssp_data)
+    return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d4000n))
+
+vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, None, None, None))
+
+@jit
+def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
+    t_rews = bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data)
+    t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
+    t_nuvk = v_nuvk_zo_dusty(templ_pars, wls, zobs, ssp_data)
+    t_d4000n = v_d4000n_zo_dusty(templ_pars, wls, zobs, ssp_data)
+    return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d4000n))
+
+vmap_colrs_bptrews_templ_zo_dusty = vmap(colrs_bptrews_templ_zo_dusty, in_axes=(0, None, None, None, None))
+
+
+@jit
+def colrs_bptrews_templ_zo_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data):
+    t_rews = bpt_rews_pars_leg(templ_pars, zref, ssp_data)
+    t_colors = vmap_cols_zo_nodust_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data)
+    t_nuvk = calc_nuvk(templ_pars, wls, zref, ssp_data)
+    t_d4000n = calc_d4000n(templ_pars, wls, zref, ssp_data)
+    return jnp.column_stack(
+        (
+            t_colors,
+            jnp.full((t_colors.shape[0], t_rews.shape[0]), t_rews),
+            jnp.full(t_colors.shape[0], t_nuvk),
+            jnp.full(t_colors.shape[0], t_d4000n)
+        )
+    )
+
+vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo_leg, in_axes=(0, None, None, 0, None, None))
+
+@jit
+def colrs_bptrews_templ_zo_dusty_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data):
+    t_rews = bpt_rews_pars_dusty_leg(templ_pars, zref, ssp_data)
+    t_colors = vmap_cols_zo_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data)
+    t_nuvk = calc_nuvk_dusty(templ_pars, wls, zref, ssp_data)
+    t_d4000n = calc_d4000n_dusty(templ_pars, wls, zref, ssp_data)
+    return jnp.column_stack(
+        (
+            t_colors,
+            jnp.full((t_colors.shape[0], t_rews.shape[0]), t_rews),
+            jnp.full(t_colors.shape[0], t_nuvk),
+            jnp.full(t_colors.shape[0], t_d4000n)
+        )
+    )
+
+vmap_colrs_bptrews_templ_zo_dusty = vmap(colrs_bptrews_templ_zo_dusty_leg, in_axes=(0, None, None, 0, None, None))
+
+
+def bpt_classif(templ_df, ssp_data, zkey='redshift', dusty=False):
+    """bpt_classif Use Restframe Equivalent Widths to provide an rudimentary classification of galaxies, using BPT diagrams as described in
+    [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract).
+
+    :param templ_df: _description_
+    :type templ_df: _type_
+    :param ssp_data: _description_
+    :type ssp_data: _type_
+    :param zkey: _description_, defaults to 'redshift'
+    :type zkey: str, optional
+    :param dusty: _description_, defaults to False
+    :type dusty: bool, optional
+    :return: _description_
+    :rtype: _type_
+    """
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+
+    templ_pars = jnp.array(templ_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+    zref = jnp.array(templ_df[zkey])
+
+    all_seds = vmap_mean_spectrum(_wls, templ_pars, zref, ssp_data) if dusty else vmap_mean_spectrum_nodust(_wls, templ_pars, zref, ssp_data)
+    all_REWs = vmap_eqw_sed(_wls, all_seds, _lines_wl)
+    _lines_df = pd.DataFrame(
+        index=templ_df.index,
+        columns=[
+            "SF_[OII]_3728.48_REW",
+            "Balmer_HI_4862.68_REW",
+            "AGN_[OIII]_5008.24_REW",
+            "SF_[OI]_6302.046_REW",
+            "Balmer_HI_6564.61_REW",
+            "AGN_[NII]_6585.27_REW",
+            "AGN_[SII]_6718.29_REW"
+        ],
+        data=all_REWs
+    )
+    lines_df = templ_df.join(_lines_df)
+
+    lines_df["log([OIII]/[Hb])"] = np.where(
+        np.logical_and(lines_df["AGN_[OIII]_5008.24_REW"] > 0.0,lines_df["Balmer_HI_4862.68_REW"] > 0.0),
+        np.log10(lines_df["AGN_[OIII]_5008.24_REW"] / lines_df["Balmer_HI_4862.68_REW"]),
+        np.nan
+    )
+
+    lines_df["log([NII]/[Ha])"] = np.where(
+        np.logical_and(lines_df["AGN_[NII]_6585.27_REW"] > 0.0, lines_df["Balmer_HI_6564.61_REW"] > 0.0),
+        np.log10(lines_df["AGN_[NII]_6585.27_REW"] / lines_df["Balmer_HI_6564.61_REW"]),
+        np.nan
+    )
+
+    lines_df["log([SII]/[Ha])"] = np.where(
+        np.logical_and(lines_df["AGN_[SII]_6718.29_REW"] > 0.0, lines_df["Balmer_HI_6564.61_REW"] > 0.0),
+        np.log10(lines_df["AGN_[SII]_6718.29_REW"] / lines_df["Balmer_HI_6564.61_REW"]),
+        np.nan
+    )
+
+    lines_df["log([OI]/[Ha])"] = np.where(
+        np.logical_and(lines_df["SF_[OI]_6302.046_REW"] > 0.0, lines_df["Balmer_HI_6564.61_REW"] > 0.0),
+        np.log10(lines_df["SF_[OI]_6302.046_REW"] / lines_df["Balmer_HI_6564.61_REW"]),
+        np.nan
+    )
+
+    lines_df["log([OIII]/[OII])"] = np.where(
+        np.logical_and(lines_df["AGN_[OIII]_5008.24_REW"] > 0.0, lines_df["SF_[OII]_3728.48_REW"] > 0),
+        np.log10(lines_df["AGN_[OIII]_5008.24_REW"] / lines_df["SF_[OII]_3728.48_REW"]),
+        np.nan
+    )
+
+    cat_nii = []
+    for x, y in zip(lines_df["log([NII]/[Ha])"], lines_df["log([OIII]/[Hb])"], strict=False):
+        if not (np.isfinite(x) and np.isfinite(y)):
+            cat_nii.append("NC")
+        elif y < Ka03_nii(x):
+            cat_nii.append("Star-forming")
+        elif y < Ke01_nii(x):
+            cat_nii.append("Composite")
+        else:
+            cat_nii.append("AGN")
+
+    lines_df["CAT_NII"] = np.array(cat_nii)
+
+    cat_sii = []
+    for x, y in zip(lines_df["log([SII]/[Ha])"], lines_df["log([OIII]/[Hb])"], strict=False):
+        if not (np.isfinite(x) and np.isfinite(y)):
+            cat_sii.append("NC")
+        elif y < Ke01_sii(x):
+            cat_sii.append("Star-forming")
+        elif y < Ke06_sii(x):
+            cat_sii.append("LINER")
+        else:
+            cat_sii.append("Seyferts")
+
+    lines_df["CAT_SII"] = np.array(cat_sii)
+
+    cat_oi = []
+    for x, y in zip(lines_df["log([OI]/[Ha])"], lines_df["log([OIII]/[Hb])"], strict=False):
+        if not (np.isfinite(x) and np.isfinite(y)):
+            cat_oi.append("NC")
+        elif y < Ke01_oi(x):
+            cat_oi.append("Star-forming")
+        elif y < Ke06_oi(x):
+            cat_oi.append("LINER")
+        else:
+            cat_oi.append("Seyferts")
+
+    lines_df["CAT_OI"] = np.array(cat_oi)
+
+    cat_oii = []
+    for x, y in zip(lines_df["log([OI]/[Ha])"], lines_df["log([OIII]/[OII])"], strict=False):
+        if not (np.isfinite(x) and np.isfinite(y)):
+            cat_oii.append("NC")
+        elif y < lim_HII_comp(x):
+            cat_oii.append("SF / composite")
+        elif y < lim_seyf_liner(x):
+            cat_oii.append("LINER")
+        else:
+            cat_oii.append("Seyferts")
+
+    lines_df["CAT_OIII/OIIvsOI"] = np.array(cat_oii)
+
+    return lines_df

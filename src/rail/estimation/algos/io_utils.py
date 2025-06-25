@@ -8,31 +8,41 @@ Created on Wed Oct 24 14:52 2024
 """
 
 import os
-import h5py
 import json
-import jax
-import numpy as np
 import pandas as pd
-from tqdm import tqdm
 from rail.dsps import load_ssp_templates
 from jax import numpy as jnp
+from .analysis import _DUMMY_PARS
+
+from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.pyplot as plt
+
+import h5py
+
+# "Viridis-like" colormap with white background
+white_viridis = LinearSegmentedColormap.from_list('white_viridis', [
+    (0, '#ffffff'),
+    (1e-20, '#440053'),
+    (0.2, '#404388'),
+    (0.4, '#2a788e'),
+    (0.6, '#21a784'),
+    (0.8, '#78d151'),
+    (1, '#fde624'),
+], N=256)
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 try:
-    PZDATALOC = os.environ["PZDATALOC"]
+    SHIREDATALOC = os.environ["SHIREDATALOC"]
 except KeyError:
-    try:
-        PZDATALOC = input("Please type in the path to FORS2 data, e.g. /home/usr/rail_dspsXfors2_pz/src/data")
-        os.environ["PZDATALOC"] = PZDATALOC
-    except Exception:
-        PZDATALOC = os.path.join(_script_dir, "data")
-        os.environ["PZDATALOC"] = PZDATALOC
+    SHIREDATALOC = os.path.abspath(os.path.join(_script_dir, "../../../examples", "data"))
+    os.environ["SHIREDATALOC"] = SHIREDATALOC
+print(f"Default location for rail_shire data set to {SHIREDATALOC}.")
 
 DEFAULTS_DICT = {}
 FILENAME_SSP_DATA = "ssp_data_fsps_v3.2_lgmet_age.h5"
-# FILENAME_SSP_DATA = "test_fspsData_v3_2_BASEL.h5"
-# FILENAME_SSP_DATA = 'test_fspsData_v3_2_C3K.h5'
-FULLFILENAME_SSP_DATA = os.path.abspath(os.path.join(PZDATALOC, "ssp", FILENAME_SSP_DATA))
+# FILENAME_SSP_DATA = "fspsData_v3_2_BASEL.h5"
+# FILENAME_SSP_DATA = 'fspsData_v3_2_C3K.h5'
+FULLFILENAME_SSP_DATA = os.path.abspath(os.path.join(SHIREDATALOC, "SSP", FILENAME_SSP_DATA))
 DEFAULTS_DICT.update({"DSPS HDF5": FULLFILENAME_SSP_DATA})
 
 def json_to_inputs(conf_json):
@@ -54,6 +64,7 @@ def json_to_inputs(conf_json):
         inputs = json.load(inpfile)
     return inputs
 
+
 def load_ssp(ssp_file=None):
     """load_ssp _summary_
 
@@ -69,125 +80,6 @@ def load_ssp(ssp_file=None):
     ssp_data = load_ssp_templates(fn=fullfilename_ssp_data)
     return ssp_data
 
-
-def templatesToHDF5(outfilename, templ_dict):
-    """
-    Writes the SED templates used for photo-z in an HDF5 for a quicker use in future runs.
-    Mimics the structure of the class SPS_Templates = namedtuple("SPS_Templates", ["name", "redshift", "z_grid", "i_mag", "colors", "nuvk"]) from process_fors2.photoZ.
-
-    Parameters
-    ----------
-    outfilename : str or path
-        Name of the `HDF5` file that will be written.
-    templ_dict : dict
-        Dictionary object containing the SED templates.
-
-    Returns
-    -------
-    path
-        Absolute path to the written file - if successful.
-    """
-    fileout = os.path.abspath(outfilename)
-
-    with h5py.File(fileout, "w") as h5out:
-        for key, templ in templ_dict.items():
-            groupout = h5out.create_group(key)
-            groupout.attrs["name"] = templ.name
-            groupout.attrs["redshift"] = templ.redshift
-            groupout.create_dataset("z_grid", data=templ.z_grid, compression="gzip", compression_opts=9)
-            groupout.create_dataset("i_mag", data=templ.i_mag, compression="gzip", compression_opts=9)
-            groupout.create_dataset("colors", data=templ.colors, compression="gzip", compression_opts=9)
-            groupout.create_dataset("nuvk", data=templ.nuvk, compression="gzip", compression_opts=9)
-
-    ret = fileout if os.path.isfile(fileout) else f"Unable to write data to {outfilename}"
-    return ret
-
-
-def readTemplatesHDF5(h5file):
-    """readTemplatesHDF5 loads the SED templates for photo-z from the specified HDF5 and returns them as a dictionary of objects
-    SPS_Templates = namedtuple("SPS_Templates", ["name", "redshift", "z_grid", "i_mag", "colors", "nuvk"]) from process_fors2.photoZ
-
-    :param h5file: Path to the HDF5 containing the SED templates data.
-    :type h5file: str or path-like object
-    :return: The dictionary of SPS_Templates objects.
-    :rtype: dictionary
-    """
-    from .template import SPS_Templates
-
-    filein = os.path.abspath(h5file)
-    out_dict = {}
-    with h5py.File(filein, "r") as h5in:
-        for key in h5in:
-            grp = h5in.get(key)
-            out_dict.update(
-                {
-                    key: SPS_Templates(
-                        grp.attrs.get("name"), grp.attrs.get("redshift"), jnp.array(grp.get("z_grid")), jnp.array(grp.get("i_mag")), jnp.array(grp.get("colors")), jnp.array(grp.get("nuvk"))
-                    )
-                }
-            )
-    return out_dict
-
-
-def photoZtoHDF5(outfilename, pz_out_dict):
-    """photoZtoHDF5 Saves the dictionary of `process_fors2.photoZ` outputs to an `HDF5` file.
-
-    :param outfilename: Name of the `HDF5` file that will be written.
-    :type outfilename: str or path-like object
-    :param pz_out_dict: Dictionary of photo-z results : each item corresponds to the array of values of one result (identified by the key) for all input galaxies.
-    :type pz_out_dict: dict
-    :return: Absolute path to the written file - if successful.
-    :rtype: str or path-like object
-    """
-    fileout = os.path.abspath(outfilename)
-
-    with h5py.File(fileout, "w") as h5out:
-        groupout = h5out.create_group("pz_outputs")
-        for key, jarray in pz_out_dict.items():
-            groupout.create_dataset(key, data=jarray, compression="gzip", compression_opts=9)
-
-    ret = fileout if os.path.isfile(fileout) else f"Unable to write data to {outfilename}"
-    return ret
-
-
-def readPhotoZHDF5(h5file):
-    """readPhotoZHDF5 Reads the photo-z results file and generates the corresponding pytree (dictionary) for analysis.
-
-    :param h5file: Path to the HDF5 containing the photo-z results.
-    :type h5file: str or path-like object
-    :return: Dictionary of photo-z results as computed by `process_fors2.photoZ`.
-    :rtype: dict
-    """
-    filein = os.path.abspath(h5file)
-    with h5py.File(filein, "r") as h5in:
-        pzout_dict = {key: jnp.array(jarray) for key, jarray in h5in.get("pz_outputs").items()}
-    return pzout_dict
-
-
-def readDSPSHDF5(h5file):
-    """readDSPSHDF5 Reads the contents of the HDF5 that stores the results of DSPS fitting procedure.
-    Useful to generate templates for photo-z estimation in `process_fors2.photoZ`.
-
-    :param h5file: Path to the HDF5 file containing the DSPS fitting results.
-    :type h5file: str or path-like
-    :return: Dictionary of DSPS parameters written as attributes in the HDF5 file
-    :rtype: dict
-    """
-    filein = os.path.abspath(h5file)
-    out_dict = {}
-    with h5py.File(filein, "r") as h5in:
-        for key, grp in h5in.items():
-            out_dict.update({key: dict(grp.attrs.items())})
-    return out_dict
-
-
-def _recursive_dict_to_hdf5(group, attrs):
-    for key, item in attrs.items():
-        if isinstance(item, dict):
-            sub_group = group.create_group(key, track_order=True)
-            _recursive_dict_to_hdf5(sub_group, item)
-        else:
-            group.attrs[key] = item
 
 def has_redshift(dic):
     """
@@ -206,199 +98,193 @@ def has_redshift(dic):
     """
     return "redshift" in list(dic.keys())
 
-def load_data_for_run(inp_glob):
-    """load_data_for_run Generates input data from the inputs configuration dictionary
+def istuple(tree):
+    """istuple Detects a leaf in a tree based on whether it is a tuple.
 
-    :param inp_glob: input configuration and settings
-    :type inp_glob: dict
-    :return: data for photo-z evaluation : redshift grid, templates dictionary and the arrays of processed observed data (input catalog) (i mags ; colors ; errors on colors ; spectro-z).
-    :rtype: 6-tuple of jax.ndarray, dictionary, jax.ndarray, jax.ndarray, jax.ndarray, jax.ndarray
+    :param tree: tree to be tested
+    :type tree: pytree
+    :return: whether the tree is a tuple or not
+    :rtype: boolean
     """
-    from rail.dsps_fors2_pz import NIR_filt, NUV_filt, get_2lists, load_filt, make_legacy_templates, make_sps_templates, sedpyFilter
+    return isinstance(tree, tuple)
 
-    _ssp_file = (
-        None
-        if (inp_glob["photoZ"]["ssp_file"].lower() == "default" or inp_glob["photoZ"]["ssp_file"] == "" or inp_glob["photoZ"]["ssp_file"] is None)
-        else os.path.abspath(inp_glob["photoZ"]["ssp_file"])
-    )
-    ssp_data = load_ssp(_ssp_file)
-
-    inputs = inp_glob["photoZ"]
-    z_grid = jnp.arange(inputs["Z_GRID"]["z_min"], inputs["Z_GRID"]["z_max"] + inputs["Z_GRID"]["z_step"], inputs["Z_GRID"]["z_step"])
-
-    filters_dict = inputs["Filters"]
-    for _f in filters_dict:
-        filters_dict[_f]["path"] = os.path.abspath(os.path.join(PZDATALOC, filters_dict[_f]["path"]))
-    print("Loading filters :")
-    filters_arr = tuple(sedpyFilter(*load_filt(int(ident), filters_dict[ident]["path"], filters_dict[ident]["transmission"])) for ident in tqdm(filters_dict)) + (NUV_filt, NIR_filt)
-
-    filters_names = [_f["name"] for _, _f in filters_dict.items()]
-    # print(f"DEBUG: filters = {filters_arr}")
-
-    print("Building templates :")
-    Xfilt = get_2lists(filters_arr)
-    # sps_temp_pkl = os.path.abspath(inputs["Templates"])
-    # sps_par_dict = read_params(sps_temp_pkl)
-    if inputs["Templates"]["overwrite"] or not os.path.isfile(os.path.abspath(inputs["Templates"]["output"])):
-        sps_temp_h5 = os.path.abspath(inputs["Templates"]["input"])
-        sps_par_dict = readDSPSHDF5(sps_temp_h5)
-        if "sps" in inputs["Mode"].lower():
-            templ_dict = jax.tree_util.tree_map(lambda dico: make_sps_templates(dico, Xfilt, z_grid, ssp_data, id_imag=inputs["i_band_num"]), sps_par_dict, is_leaf=has_redshift)
-        else:
-            templ_dict = jax.tree_util.tree_map(lambda dico: make_legacy_templates(dico, Xfilt, z_grid, ssp_data, id_imag=inputs["i_band_num"]), sps_par_dict, is_leaf=has_redshift)
-        _ = templatesToHDF5(inputs["Templates"]["output"], templ_dict)
-    else:
-        templ_dict = readTemplatesHDF5(inputs["Templates"]["output"])
-
-    print("Loading observations :")
-    data_path = os.path.abspath(os.path.join(PZDATALOC, inputs["Dataset"]["path"]))
-    data_ismag = inputs["Dataset"]["type"].lower() == "m"
-
-    if inputs["Dataset"]["is_ascii"]:
-        h5catpath = catalog_ASCIItoHDF5(data_path, data_ismag, filt_names=filters_names)
-    else:
-        h5catpath = data_path
-
-    if inputs["Dataset"]["overwrite"] or not os.path.isfile(f"pz_inputs_{os.path.basename(h5catpath)}"):
-        ab_mags, ab_mags_errs, z_specs = readCatalogHDF5(h5catpath, filt_names=filters_names)
-
-        from .galaxy import vmap_mags_to_i_and_colors
-        i_mag_ab, ab_colors, ab_cols_errs = vmap_mags_to_i_and_colors(ab_mags, ab_mags_errs, inputs["i_band_num"])
-
-        clrh5file = f"pz_inputs_{os.path.basename(h5catpath)}"
-        _colrs_h5out = pzInputsToHDF5(clrh5file, ab_colors, ab_cols_errs, z_specs, i_mag_ab, filt_names=filters_names)
-    else:
-        i_mag_ab, ab_colors, ab_cols_errs, z_specs = readPZinputsHDF5(f"pz_inputs_{os.path.basename(h5catpath)}", filt_names=filters_names)
-
-    return z_grid, templ_dict, i_mag_ab, ab_colors, ab_cols_errs, z_specs
-
-
-def readCatalogHDF5(h5file, group="catalog", filt_names=None):
+def readCatalogHDF5(h5file, group="photometry", filt_names=None, bounds=None):
     """readCatalogHDF5 Reads the magnitudes and spectroscopic redshift (if available) from a dictionary-like catalog provided as an `HDF5` file.
     Preliminary step for the `process_fors2.photoZ` calculations.
 
     :param h5file: Path to the HDF5 catalog file.
     :type h5file: str or path-like
-    :param group: Identifier of the group to read within the `HDF5` file. This argument is passed to the `key` argument of `pandas.DataFrame.read_hdf`. Defaults to 'catalog'.
+    :param group: Identifier of the group to read within the `HDF5` file. This argument is passed to the `key` argument of `pandas.DataFrame.read_hdf`. Defaults to 'photometry'.
     :type group: str, optional
     :param filt_names: Names of filters to look for in the catalogs. Data recorded as `mag_[filter name]` and `mag_err_[filter name]` will be returned.
     If None, defaults to LSST filters. Defaults to None.
     :type filt_names: list of str, optional
+    :param bounds: index of first and last elements to load. If None, reads the whole catalog. Defaults to None.
+    :type bounds: 2-tuple of int or None
     :return: tuple containing AB magnitudes, corresponding errors and spectroscopic redshift as arrays.
     :rtype: tuple of arrays
     """
     if filt_names is None:
-        filt_names = ["lsst_u", "lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"]
+        filt_names = ["u_lsst", "g_lsst", "r_lsst", "i_lsst", "z_lsst", "y_lsst"]
     df_cat = pd.read_hdf(os.path.abspath(h5file), key=group)
+    if bounds is not None:
+        df_cat = df_cat[bounds[0] : bounds[-1]].copy()
     magnames = [f"mag_{filt}" for filt in filt_names]
     magerrs = [f"mag_err_{filt}" for filt in filt_names]
     obs_mags = jnp.array(df_cat[magnames])
     obs_mags_errs = jnp.array(df_cat[magerrs])
     try:
-        z_specs = jnp.array(df_cat["z_spec"])
+        z_specs = jnp.array(df_cat["redshift"])
     except IndexError:
         z_specs = jnp.full(obs_mags.shape[0], jnp.nan)
     return obs_mags, obs_mags_errs, z_specs
 
 
-def catalog_ASCIItoHDF5(ascii_file, data_ismag, group="catalog", filt_names=None):
-    """catalog_ASCIItoHDF5 Reads a catalog provided as an ASCII file (as in LEPHARE) containing either fluxes or magnitudes and saves it in an `HDF5` file containing AB-magnitudes.
+def read_h5_table(templ_h5_file, group="fit_dsps", classif="Classification"):
+    """read_h5_table _summary_
 
-    :param ascii_file: Path to the ASCII file containing catalog cata as an array that can be read with `numpy.loadtxt(ascii_file)`.
-    :type ascii_file: str or path-like
-    :param data_ismag: Whether the photometry in the file is given as AB-magnitudes or flux density (in erg/s/cm²/Hz). True for AB-magnitudes.
-    :type data_ismag: bool
-    :param group: Name of the group to write in the `HDF5` file. This argument is passed to the `key` argument of `pandas.DataFrame.to_hdf`. Defaults to 'catalog'.
+    :param templ_h5_file: _description_
+    :type templ_h5_file: _type_
+    :param group: _description_, defaults to 'fit_dsps'
     :type group: str, optional
-    :param filt_names: Names of filters to use as column names in the catalog. Data will be recored as `mag_[filter name]` and `mag_err_[filter name]`.
-    If None, defaults to LSST filters. Defaults to None.
-    :type filt_names: list of str, optional
-    :return: Absolute path to the written file - if successful.
-    :rtype: str or path-like object
+    :param classif: Name of the field holding classif. info. 'Classification', 'CAT_NII', 'CAT_SII', 'CAT_OI' or 'CAT_OIII/OIIvsOI', defaults to 'Classification'
+    :type classif: str, optional
+    :return: _description_
+    :rtype: _type_
     """
-    if filt_names is None:
-        filt_names = ["lsst_u", "lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"]
-    magnames = [f"mag_{filt}" for filt in filt_names]
-    magerrs = [f"mag_err_{filt}" for filt in filt_names]
-    N_FILT = len(filt_names)
-    data_file_arr = np.loadtxt(os.path.abspath(ascii_file))
-    has_zspec = data_file_arr.shape[1] == 1 + 2 * N_FILT + 1
-    no_zspec = data_file_arr.shape[1] == 1 + 2 * N_FILT
-    assert has_zspec or no_zspec, "Number of column in data does not match one of 1 + 2*n_filts + 1 (id, photometry, z_spec) or 1 + 2*n_filts (id, photometry).\
-        \nReview data or filters list."
-
-    from .galaxy import vmap_load_magnitudes
-
-    all_mags, all_mags_err = vmap_load_magnitudes(data_file_arr[:, 1 : 2 * N_FILT + 1], data_ismag)
-
-    all_zs = data_file_arr[:, -1] if has_zspec else jnp.full(all_mags.shape[0], jnp.nan)
-
-    df_mags = pd.DataFrame(columns=magnames + magerrs + ["z_spec"], data=jnp.column_stack((all_mags, all_mags_err, all_zs)))
-
-    hdf_name = f"{os.path.splitext(os.path.basename(ascii_file))[0]}.h5"
-    outfilename = os.path.abspath(hdf_name)
-    df_mags.to_hdf(outfilename, key=group)
-    respath = outfilename if os.path.isfile(outfilename) else f"Unable to write data to {outfilename}"
-    return respath
+    templ_df = pd.read_hdf(os.path.abspath(templ_h5_file), key=group)
+    templ_pars_arr = jnp.array(templ_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+    zref_arr = jnp.array(templ_df["redshift"])
+    classif_series = templ_df[classif]  # Default value is 'Classification' but other criteria can be used : 'CAT_NII', 'CAT_SII', etc.
+    return templ_pars_arr, zref_arr, classif_series  # placeholder, finish the function later to return the proper array of parameters
 
 
-def pzInputsToHDF5(h5file, clrs_ind, clrs_ind_errs, z_specs, i_mags, filt_names=None):
-    """pzInputsToHDF5 Saves the photometry inputs as processed for the `process_fors2.photoZ` module, *i.e.* color indices, associated errors and spectro-z if available.
-    Filter names must match those used for the photo-z estimation. Allows not to reprocess the catalog everytime the code is used on a similar dataset.
+def plot_zp_zs_ensemble(ens_PDFs, z_true, z_grid=None, key_estim="zmode", label='', bins=100):
+    f, ax = plt.subplots(1, 1, figsize=(7, 6))
+    z_grid = jnp.squeeze(jnp.array(ens_PDFs[0].dist.xvals, dtype=jnp.float64)) if z_grid is None else z_grid
+    zp = jnp.squeeze(ens_PDFs.mode(z_grid)) if key_estim is None else ens_PDFs.ancil[key_estim]
+    zs = jnp.squeeze(z_true) #ens_PDFs.ancil[key_truth]
+    bias = zp - zs
+    errz = bias/(1+zs)
+    _, sigscat, medscat = jnp.mean(errz), jnp.std(errz), jnp.median(errz)
+    mad = jnp.median(jnp.abs(errz)) # - medscat))
+    sig_mad = 1.4826 * mad
+    outliers = jnp.nonzero(jnp.abs(errz)*100.0 > 15) #3*sigscat) #
+    outl_rate = zs[outliers].shape[0] / zs.shape[0]
 
-    :param h5file: Name for the HDF5 inputs file to be written.
-    :type h5file: str or path-like
-    :param clrs_ind: Array of color indices in magnitudes units
-    :type clrs_ind: array
-    :param clrs_ind_errs: Array of error on color indices in magnitudes units
-    :type clrs_ind_errs: array
-    :param z_specs: Array of spectroscopic redshifts (`jnp.nan` if unavailable in the catalog)
-    :type z_specs: array
-    :param i_mags: Array of magnitudes in i-band for nz prior computation.
-    :type i_mags: array
-    :param filt_names: Names of filters to use as column names in the catalog.
-    Color indices will be recorded as `[filter name i]-[filter name i+1]` and `[filter name i]-[filter name i+1]_err`.
-    If None, defaults to LSST filters. Defaults to None.
-    :type filt_names: list of str, optional
-    :return: Absolute path to the written file - if successful.
-    :rtype: str or path-like object
-    """
-    if filt_names is None:
-        filt_names = ["lsst_u", "lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"]
+    density = ax.hexbin(zs, zp, bins='log', gridsize=bins)
+    ax.plot(z_grid, z_grid, c="k", ls=":", lw=1)
+    outl, = ax.plot(z_grid, z_grid + 0.15 * (1 + z_grid), c="k", lw=2)
+    ax.plot(z_grid, z_grid - 0.15 * (1 + z_grid), c="k", lw=2)
 
-    color_names = [f"{n1}-{n2}" for (n1, n2) in zip(filt_names[:-1], filt_names[1:], strict=True)]
+    med, = ax.plot(z_grid, z_grid + medscat*(1 + z_grid), c="orange", lw=2, ls='-.') #, label=r"$\mathrm{median}\left(\zeta_z \right)$")
+    scat = ax.fill_between(z_grid, z_grid + (medscat+sigscat)*(1 + z_grid), z_grid + (medscat-sigscat)*(1 + z_grid), color="pink", alpha=0.4)
+    
+    ax.set_xlabel(r"$z_{spec}$")
+    ax.set_ylabel(r"$z_{phot}$")
+    ax.set_xlim(z_grid.min()-0.05, z_grid.max()+0.05)
+    ax.set_ylim(z_grid.min()-0.05, z_grid.max()+0.05)
+    f.legend(
+        [density, outl, (med, scat)],
+        [
+            label,
+            "Outliers:\n"+r"$\left| \frac{z_p-z_s}{1+z_s} \right| > 0.15$",
+            r"$\mathrm{median} \left( \zeta_z \right) \pm \sigma_{\zeta_z}=$"+f"\n\t{medscat:.3f}"+r"$\pm$"+f"{sigscat:.3f}"
+        ],
+        loc='lower right',
+        bbox_to_anchor=(1., 0.)
+    )
+    ax.grid()
+    ax.set_title(f"{100.0*outl_rate:.3f}% outliers ;\n"+r"$\sigma_{MAD}=$"+f"{sig_mad:.3f}")
 
-    color_err_names = [f"{n1}-{n2}_err" for (n1, n2) in zip(filt_names[:-1], filt_names[1:], strict=True)]
+    #plt.colorbar(scalarMap, ax=ax, location='right', label="Scatter (%)")
+    _ = f.colorbar(density, label='Density', location='right')
+    ax.set_aspect("equal", adjustable="box", share=False)
+    
+    print(f"{label}: {100*outl_rate:.3f}% outliers out of {len(zp)} successful fits.\nsigma_mad: {sig_mad:.3f}.")
+    return ax
 
-    df_clrs = pd.DataFrame(columns=color_names + color_err_names + ["i_mag", "z_spec"], data=jnp.column_stack((clrs_ind, clrs_ind_errs, i_mags, z_specs)))
-    outfilename = os.path.abspath(h5file)
-    df_clrs.to_hdf(outfilename, "pz_inputs")
-    respath = outfilename if os.path.isfile(outfilename) else f"Unable to write data to {outfilename}"
-    return respath
+def plot_zp_zs_hdf5BPZ(pdfs_hdf5, zs, key_zgrid='xvals', key_estim='zmode', label='', bins=100):
+    f, ax = plt.subplots(1, 1, figsize=(7, 6))
+    
+    with h5py.File(pdfs_hdf5, 'r') as h5pdf:
+        ancil = h5pdf.get('ancil')
+        meta = h5pdf.get('meta')
+        z_grid = jnp.squeeze(jnp.array(meta.get(key_zgrid), dtype=jnp.float64))
+        zp = jnp.array(ancil.get(key_estim), dtype=jnp.float64)
+    
+    bias = zp - zs
+    errz = bias/(1+zs)
+    _, sigscat, medscat = jnp.mean(errz), jnp.std(errz), jnp.median(errz)
+    mad = jnp.median(jnp.abs(errz)) # - medscat))
+    sig_mad = 1.4826 * mad
+    outliers = jnp.nonzero(jnp.abs(errz)*100.0 > 15) #3*sigscat) #
+    outl_rate = len(zs[outliers]) / len(zs)
+
+    density = ax.hexbin(zs, zp, bins='log', gridsize=bins)
+    ax.plot(z_grid, z_grid, c="k", ls=":", lw=1)
+    outl, = ax.plot(z_grid, z_grid + 0.15 * (1 + z_grid), c="k", lw=2)
+    ax.plot(z_grid, z_grid - 0.15 * (1 + z_grid), c="k", lw=2)
+
+    med, = ax.plot(z_grid, z_grid + medscat*(1 + z_grid), c="orange", lw=2, ls='-.')
+    scat = ax.fill_between(z_grid, z_grid + (medscat+sigscat)*(1 + z_grid), z_grid + (medscat-sigscat)*(1 + z_grid), color="pink", alpha=0.4)
+    
+    ax.set_xlabel(r"$z_{spec}$")
+    ax.set_ylabel(r"$z_{phot}$")
+    ax.set_xlim(z_grid.min()-0.05, z_grid.max()+0.05)
+    ax.set_ylim(z_grid.min()-0.05, z_grid.max()+0.05)
+    f.legend(
+        [density, outl, (med, scat)],
+        [
+            label,
+            "Outliers:\n"+r"$\left| \frac{z_p-z_s}{1+z_s} \right| > 0.15$",
+            r"$\mathrm{median} \left( \zeta_z \right) \pm \sigma_{\zeta_z}=$"+f"\n\t{medscat:.3f}"+r"$\pm$"+f"{sigscat:.3f}"
+        ],
+        loc='lower right',
+        bbox_to_anchor=(1., 0.)
+    )
+    ax.grid()
+    ax.set_title(f"{100.0*outl_rate:.3f}% outliers ;\n"+r"$\sigma_{MAD}=$"+f"{sig_mad:.3f}")
+
+    #plt.colorbar(scalarMap, ax=ax, location='right', label="Scatter (%)")
+    _ = f.colorbar(density, label='Density', location='right')
+    ax.set_aspect("equal", adjustable="box", share=False)
+    
+    print(f"{label}: {100*outl_rate:.3f}% outliers out of {len(zp)} successful fits.\nsigma_mad: {sig_mad:.3f}. Median scatter {medscat*100:.3f}%.")
+    return ax
 
 
-def readPZinputsHDF5(h5file, filt_names=None):
-    """readPZinputsHDF5 Reads pre-existing photometry inputs for the `process_fors2.photoZ` module, *i.e.* color indices, associated errors and spectro-z if available.
-    Filter names must match those used for the photo-z estimation. Allows not to reprocess the catalog everytime the code is used on a similar dataset.
+def hist_outliers(qp_ens_1, zs, z_grid=None, key_estim='zmode', label1='', qp_ens_2=None, label2='', qp_ens_3=None, label3=''):
+    f, ax = plt.subplots(1, 1, figsize=(7, 6))
 
-    :param h5file: Path to the HDF5 inputs file.
-    :type h5file: str or path-like
-    :param filt_names: Names of filters to look for in the catalogs. Color indices `[filter name i]-[filter name i+1]` and `[filter name i]-[filter name i+1]_err` will be returned.
-    If None, defaults to LSST filters. Defaults to None.
-    :type filt_names: list of str, optional
-    :return: 4-tuple of JAX arrays containing data to perform photo-z estimation (`jnp.nan` if missing) : mags in i-band ; color indices ; associated errors and spectro-z.
-    :rtype: tuple(arrays)
-    """
-    if filt_names is None:
-        filt_names = ["lsst_u", "lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"]
+    z_grid = jnp.squeeze(jnp.array(qp_ens_1[0].dist.xvals, dtype=jnp.float64)) if z_grid is None else z_grid
+    zp1 = jnp.squeeze(qp_ens_1.mode(z_grid)) if key_estim is None else qp_ens_1.ancil[key_estim]
 
-    color_names = [f"{n1}-{n2}" for (n1, n2) in zip(filt_names[:-1], filt_names[1:], strict=True)]
+    bias1 = zp1 - zs
+    errz1 = bias1/(1+zs)
+    outliers1 = jnp.nonzero(jnp.abs(errz1)*100.0 > 15) #3*sigscat) #
+    _nsz, _binsz = jnp.histogram(zs, bins=50, density=False)
+    _n1, _ = jnp.histogram(zs[outliers1], bins=_binsz, density=False)
+    ax.stairs(100.0*_n1/_nsz, edges=_binsz, fill=True, label=label1, alpha=0.57)
 
-    color_err_names = [f"{n1}-{n2}_err" for (n1, n2) in zip(filt_names[:-1], filt_names[1:], strict=True)]
+    if qp_ens_2 is not None:
+        zp2 = jnp.squeeze(qp_ens_2.mode(z_grid)) if key_estim is None else qp_ens_2.ancil[key_estim]
+        bias2 = zp2 - zs
+        errz2 = bias2/(1+zs)
+        outliers2 = jnp.nonzero(jnp.abs(errz2)*100.0 > 15) #3*sigscat) #
+        _n2, _ = jnp.histogram(zs[outliers2], bins=_binsz, density=False)
+        ax.stairs(100.0*_n2/_nsz, edges=_binsz, fill=True, label=label2, alpha=0.57)
 
-    df_clrs = pd.read_hdf(os.path.abspath(h5file), key="pz_inputs")
-    colrs = jnp.array(df_clrs[color_names])
-    colrs_errs = jnp.array(df_clrs[color_err_names])
-    i_mags = jnp.array(df_clrs["i_mag"])
-    z_specs = jnp.array(df_clrs["z_spec"])
-    return i_mags, colrs, colrs_errs, z_specs
+    if qp_ens_3 is not None:
+        zp3 = jnp.squeeze(qp_ens_3.mode(z_grid)) if key_estim is None else qp_ens_3.ancil[key_estim]
+        bias3 = zp3 - zs
+        errz3 = bias3/(1+zs)
+        outliers3 = jnp.nonzero(jnp.abs(errz3)*100.0 > 15) #3*sigscat) #
+        _n3, _ = jnp.histogram(zs[outliers3], bins=_binsz, density=False)
+        ax.stairs(100.0*_n3/_nsz, edges=_binsz, fill=True, label=label3, alpha=0.57)
+    
+    #ax.set_aspect("equal", "box")
+    ax.set_xlabel(r"$z_{spec}$")
+    ax.set_ylabel("Outliers in bins [%]")
+    ax.legend()
+    return ax
