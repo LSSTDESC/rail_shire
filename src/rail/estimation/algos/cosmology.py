@@ -40,11 +40,14 @@ PriorParams = namedtuple("PriorParams", ["mod", "zot", "kt", "alpt0", "pcal", "k
 ktf = jnp.array([0.47165, 0.30663, 0.12715, -0.34437])
 ft = jnp.array([0.43199, 0.07995, 0.31162, 0.21220])
 
+# dn/dz noramlisation?
+pcal = jnp.array([0.89744, 0.90868, 0.89747, 0.91760])
+
 prior_params_set = (
-    PriorParams(0, 0.45181, 0.13677, 3.33078, 0.89744, ktf[0], ft[0], (4.25, jnp.inf)),
-    PriorParams(1, 0.16560, 0.12983, 1.42815, 0.90868, ktf[1], ft[1], (3.19, 4.25)),
-    PriorParams(2, 0.21072, 0.14008, 1.58310, 0.89747, ktf[2], ft[2], (1.9, 3.19)),
-    PriorParams(3, 0.20418, 0.13773, 1.34500, 0.91760, ktf[3], ft[3], (-jnp.inf, 1.9)),
+    PriorParams(0, 0.45181, 0.13677, 3.33078, pcal[0], ktf[0], ft[0], (4.25, jnp.inf)),
+    PriorParams(1, 0.16560, 0.12983, 1.42815, pcal[1], ktf[1], ft[1], (3.19, 4.25)),
+    PriorParams(2, 0.21072, 0.14008, 1.58310, pcal[2], ktf[2], ft[2], (1.9, 3.19)),
+    PriorParams(3, 0.20418, 0.13773, 1.34500, pcal[3], ktf[3], ft[3], (-jnp.inf, 1.9)),
 )
 
 prior_pars_E_S0, prior_pars_Sbc, prior_pars_Scd, prior_pars_Irr = prior_params_set  # noqa: N816
@@ -392,7 +395,7 @@ def nz_prior_params(nuvk):
         zot = 0.45181
         kt = 0.13677
         alpt0 = 3.33078
-        pcal = 0.89744
+        cal = 0.89744
     elif nuvk > 3.19:
         # Case Sbc
         # Color UV-K of PHOTO_230506/Sbc_cww.sed.resample.new.resample8.inter
@@ -400,7 +403,7 @@ def nz_prior_params(nuvk):
         zot = 0.16560
         kt = 0.12983
         alpt0 = 1.42815
-        pcal = 0.90868
+        cal = 0.90868
     elif nuvk > 1.9:
         # Case Scd
         # Color UV-K of PHOTO_230506/Scd_cww.sed.resample.new.resample7.inter  -19.4878 + 21.1501
@@ -408,15 +411,15 @@ def nz_prior_params(nuvk):
         zot = 0.21072
         kt = 0.14008
         alpt0 = 1.58310
-        pcal = 0.89747
+        cal = 0.89747
     else:
         # Case Irr
         mod = 3  # noqa: F841
         zot = 0.20418
         kt = 0.13773
         alpt0 = 1.34500
-        pcal = 0.91760
-    return alpt0, zot, kt, pcal
+        cal = 0.91760
+    return alpt0, zot, kt, cal
 
 
 @jit
@@ -429,17 +432,17 @@ def nz_prior_fracs(imag, m0, ktf_m, ft_m):
 
 
 @jit
-def dndz_prior(z, imag, m0, alpt0, zot, kt, pcal):
+def dndz_prior(z, imag, m0, alpt0, zot, kt, cal):
     kk = imag-m0
     zmax = zot + kt*kk
     pz = jnp.power(z, alpt0) * jnp.exp( -jnp.power( (z/zmax), alpt0 ) )
     # Normalisation of the probability function
-    _pcal = jnp.power(zot + kt*kk, alpt0+1) / alpt0*pcal
+    _pcal = jnp.power(zot + kt*kk, alpt0+1) / alpt0*cal
     return pz/_pcal
 
 
 @jit
-def nz_prior_core(z, imag, m0, alpt0, zot, kt, pcal, ktf_m, ft_m):
+def nz_prior_core(z, imag, m0, alpt0, zot, kt, cal, ktf_m, ft_m):
     """nz_prior_core Computes the n(z) prior value in function of input parameters, as done in LEPHARE for the COSMOS2020 catalog, from VVDS data.
 
     :param z: Redshift at which the prior is evaluated
@@ -454,8 +457,8 @@ def nz_prior_core(z, imag, m0, alpt0, zot, kt, pcal, ktf_m, ft_m):
     :type zot: float
     :param kt: kt prior parameter value
     :type kt: float
-    :param pcal: pcal prior parameter value
-    :type pcal: float
+    :param cal: pcal prior parameter value
+    :type cal: float
     :param ktf_m: ktf_m prior parameter value
     :type ktf_m: float
     :param ft_m: ft_m prior parameter value
@@ -464,7 +467,7 @@ def nz_prior_core(z, imag, m0, alpt0, zot, kt, pcal, ktf_m, ft_m):
     :rtype: float
     """
     # Final value
-    val = dndz_prior(z, imag, m0, alpt0, zot, kt, pcal) * nz_prior_fracs(imag, m0, ktf_m, ft_m)
+    val = dndz_prior(z, imag, m0, alpt0, zot, kt, cal) * nz_prior_fracs(imag, m0, ktf_m, ft_m)
     return val
 
 """E(B-V) prior not in use
