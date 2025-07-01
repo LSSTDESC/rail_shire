@@ -1,5 +1,6 @@
 import os
 import jax
+from functools import partial
 from jax import numpy as jnp
 from jax.tree_util import tree_map
 from jax import jit, vmap
@@ -165,39 +166,43 @@ class ShireEstimator(CatEstimator):
         CatEstimator.open_model(self, **kwargs)
         self.modeldict = self.model
         self.e0_pars = PriorParams(
+            0,
             "E_S0",
-            self.modeldict.fo_arr[0],
-            self.modeldict.kt_arr[0],
-            self.modeldict.zo_arr[0],
-            self.modeldict.a_arr[0],
-            self.modeldict.km_arr[0],
+            self.modeldict["fo_arr"][0],
+            self.modeldict["kt_arr"][0],
+            self.modeldict["zo_arr"][0],
+            self.modeldict["a_arr"][0],
+            self.modeldict["km_arr"][0],
             (4.25, jnp.inf)
         )
         self.sbc_pars = PriorParams(
+            1,
             "Sbc",
-            self.modeldict.fo_arr[1],
-            self.modeldict.kt_arr[1],
-            self.modeldict.zo_arr[1],
-            self.modeldict.a_arr[1],
-            self.modeldict.km_arr[1],
+            self.modeldict["fo_arr"][1],
+            self.modeldict["kt_arr"][1],
+            self.modeldict["zo_arr"][1],
+            self.modeldict["a_arr"][1],
+            self.modeldict["km_arr"][1],
             (3.19, 4.25)
         )
         self.scd_pars = PriorParams(
+            2,
             "Scd",
-            self.modeldict.fo_arr[2],
-            self.modeldict.kt_arr[2],
-            self.modeldict.zo_arr[2],
-            self.modeldict.a_arr[2],
-            self.modeldict.km_arr[2],
+            self.modeldict["fo_arr"][2],
+            self.modeldict["kt_arr"][2],
+            self.modeldict["zo_arr"][2],
+            self.modeldict["a_arr"][2],
+            self.modeldict["km_arr"][2],
             (1.9, 3.19)
         )
         self.irr_pars = PriorParams(
+            3,
             "Irr",
-            self.modeldict.fo_arr[3],
-            self.modeldict.kt_arr[3],
-            self.modeldict.zo_arr[3],
-            self.modeldict.a_arr[3],
-            self.modeldict.km_arr[3],
+            self.modeldict["fo_arr"][3],
+            self.modeldict["kt_arr"][3],
+            self.modeldict["zo_arr"][3],
+            self.modeldict["a_arr"][3],
+            self.modeldict["km_arr"][3],
             (-jnp.inf, 1.9)
         )
 
@@ -366,7 +371,7 @@ class ShireEstimator(CatEstimator):
         )
         return ab_colors, ab_cols_errs, i_mag_ab
 
-    @jit
+    @partial(jit, static_argnums=0)
     def prior_z0(self, nuvk):
         """prior_z0 Determines the z0 value of the prior function
 
@@ -384,7 +389,7 @@ class ShireEstimator(CatEstimator):
         return val
 
 
-    @jit
+    @partial(jit, static_argnums=0)
     def prior_alpha(self, nuvk):
         """prior_alpha Determines the alpha0 value in the prior function (power law)
 
@@ -402,7 +407,7 @@ class ShireEstimator(CatEstimator):
         return val
 
 
-    @jit
+    @partial(jit, static_argnums=0)
     def prior_km(self, nuvk):
         """prior_km Determines the k value in the prior function
 
@@ -420,7 +425,7 @@ class ShireEstimator(CatEstimator):
         return val
 
 
-    @jit
+    @partial(jit, static_argnums=0)
     def prior_fo(self, nuvk):
         """prior_fo Determines the f0 value in the prior (fractions) function
 
@@ -438,7 +443,7 @@ class ShireEstimator(CatEstimator):
         return val
 
 
-    @jit
+    @partial(jit, static_argnums=0)
     def prior_kt(self, nuvk):
         """prior_kt Determines the kt value in the prior (fractions) function
 
@@ -471,8 +476,8 @@ class ShireEstimator(CatEstimator):
         return val_prior
 
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None))
-    
-    
+
+
     def _val_prior_gals(self, oimags, z, nuvk):
         nzval = self.vmap_nz_gals(oimags, z, nuvk)
         fracval = self.vmap_frac_gals(oimags, nuvk)
