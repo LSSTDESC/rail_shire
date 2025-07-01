@@ -7,6 +7,7 @@ from jax import jit, vmap
 from jax.tree_util import tree_map
 from jax.scipy.special import gamma as jgamma
 from jax.scipy.optimize import minimize as jmini
+#import scipy.optimize as sciop
 #from jax import random as jrn
 
 import pandas as pd
@@ -55,8 +56,9 @@ jax.config.update("jax_enable_x64", True)
 PriorParams = namedtuple("PriorParams", ["type", "fo", "kt", "z0", "alpha", "km", "nuv_range"])
 
 @jit
-def nz_func(X, m0, m, z):  # pragma: no cover
+def nz_func(mz, X, m0):  # pragma: no cover
     z0, alpha, km = X
+    m, z = mz
     zm = z0 + (km * (m - m0))
     vals = jnp.power(z, alpha) * jnp.exp(- jnp.power((z / zm), alpha))
     Inorm = jnp.power(zm, (alpha + 1)) * jgamma(1 + 1 / alpha) / alpha
@@ -64,15 +66,15 @@ def nz_func(X, m0, m, z):  # pragma: no cover
 
 vmap_dndz_gals = vmap(
     nz_func,
-    in_axes=(None, None, 0, 0)
+    in_axes=(0, None, None)
 )
 
 vmap_dndz = vmap(
     vmap(
         nz_func,
-        in_axes=(None, None, 0, 0)
+        in_axes=(0, None, None)
     ),
-    in_axes=(0, None, None, None)
+    in_axes=(None, 0, None)
 )
 
 @jit
@@ -361,7 +363,7 @@ class ShireInformer(CatInformer):
     def _frac_likelihood(self, frac_params): #, btyp, idxbtyp):
         _foi = frac_params[:self.ntyp]
         _kti = frac_params[self.ntyp:]
-        X = jnp.vstack((_foi, _kti)).T
+        X = (_foi, _kti) #jnp.vstack((_foi, _kti)).T
         probs = vmap_frac(X, self.m0, self.refmags)
         norms = jnp.sum(probs, axis=0)
         probs = probs / norms
@@ -374,7 +376,7 @@ class ShireInformer(CatInformer):
     def _dn_dz_likelihood(self, pars):
         marr = self.refmags[self.typmask]
         zarr = self.szs[self.typmask]
-        lik = vmap_dndz_gals(pars, self.m0, marr, zarr)
+        lik = vmap_dndz_gals((marr, zarr), pars, self.m0)
         nllik = jnp.sum(jnp.where(lik>0, -jnp.log(lik), 0))
         return nllik
 
@@ -396,16 +398,7 @@ class ShireInformer(CatInformer):
         fracnorm = jnp.sum(tmpfo)
         self.fo_arr = tmpfo/fracnorm
         self.kt_arr = frac_results[self.ntyp:]
-        '''
-        self.e0_pars["fo"] = self.fo_arr[0]
-        self.sbc_pars["fo"] = self.fo_arr[1]
-        self.scd_pars["fo"]= self.fo_arr[2]
-        self.irr_pars["fo"] = self.fo_arr[3]
-        self.e0_pars["kt"] = self.kt_arr[0]
-        self.sbc_pars["kt"] = self.kt_arr[1]
-        self.scd_pars["kt"] = self.kt_arr[2]
-        self.irr_pars["kt"] = self.kt_arr[3]
-        '''
+
 
     #@partial(jit, static_argnums=(0))
     def _find_dndz_params(self):
@@ -417,7 +410,7 @@ class ShireInformer(CatInformer):
         for i in range(self.ntyp):
             print(f"minimizing for type {i}")
             self.typmask = tuple(b == i for b in self.besttypes)
-            dndzparams = tuple([self.config.init_z0, self.config.init_alpha, self.config.init_km])
+            dndzparams = jnp.array([self.config.init_z0, self.config.init_alpha, self.config.init_km])
             zoi, alfi, kmi = jmini(self._dn_dz_likelihood, dndzparams, method="BFGS").x
             zo_arr.append(zoi)
             a_arr.append(alfi)
@@ -445,9 +438,8 @@ class ShireInformer(CatInformer):
         #self.fo_arr = fracs
         self._find_fractions()
 
-
-        print("Finding prior parameters...")
         """
+        print("Fitting prior parameters...")
         z0list = []
         alflist = []
         kmlist = []
@@ -459,7 +451,8 @@ class ShireInformer(CatInformer):
             nz = jnp.array([_nz[nbin] for nbin in jnp.digitize(zs, _bins)])
             print(m_i.shape, zs.shape, nz.shape)
             z0, alpha, km = sciop.curve_fit(
-                lambda P : vmap_dndz_gals(P, self.m0, m_i, zs),
+                lambda mz, P : vmap_dndz_gals(mz, P, self.m0),
+                (m_i, zs),
                 nz,
                 p0=(self.config.init_z0, self.config.init_alpha, self.config.init_km)
             )[0]
@@ -470,20 +463,7 @@ class ShireInformer(CatInformer):
         """
 
         z0list, alflist, kmlist = self._find_dndz_params()
-        '''
-        self.e0_pars["z0"] = z0list[0]
-        self.sbc_pars["z0"] = z0list[1]
-        self.scd_pars["z0"]= z0list[2]
-        self.irr_pars["z0"] = z0list[3]
-        self.e0_pars["alpha"] = alflist[0]
-        self.sbc_pars["alpha"] = alflist[1]
-        self.scd_pars["alpha"] = alflist[2]
-        self.irr_pars["alpha"] = alflist[3]
-        self.e0_pars["km"] = kmlist[0]
-        self.sbc_pars["km"] = kmlist[1]
-        self.scd_pars["km"] = kmlist[2]
-        self.irr_pars["km"] = kmlist[3]
-        '''
+
         return z0list, alflist, kmlist #jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist)
 
 
@@ -652,6 +632,47 @@ class ShireInformer(CatInformer):
             mo=self.m0,
             nt_array=None
         )
+        self.e0_pars = PriorParams(
+            0,
+            self.refcategs[0],
+            self.model["fo_arr"][0],
+            self.model["kt_arr"][0],
+            self.model["zo_arr"][0],
+            self.model["a_arr"][0],
+            self.model["km_arr"][0],
+            (4.25, jnp.inf)
+        )
+        self.sbc_pars = PriorParams(
+            1,
+            self.refcategs[1],
+            self.model["fo_arr"][1],
+            self.model["kt_arr"][1],
+            self.model["zo_arr"][1],
+            self.model["a_arr"][1],
+            self.model["km_arr"][1],
+            (3.19, 4.25)
+        )
+        self.scd_pars = PriorParams(
+            2,
+            self.refcategs[2],
+            self.model["fo_arr"][2],
+            self.model["kt_arr"][2],
+            self.model["zo_arr"][2],
+            self.model["a_arr"][2],
+            self.model["km_arr"][2],
+            (1.9, 3.19)
+        )
+        self.irr_pars = PriorParams(
+            3,
+            self.refcategs[3],
+            self.model["fo_arr"][3],
+            self.model["kt_arr"][3],
+            self.model["zo_arr"][3],
+            self.model["a_arr"][3],
+            self.model["km_arr"][3],
+            (-jnp.inf, 1.9)
+        )
+        
         self.add_data("model", self.model)
         self.add_handle("templates", data=self.templates_df, path=self.config.output)
 
