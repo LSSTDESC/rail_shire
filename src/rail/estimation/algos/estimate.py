@@ -505,10 +505,10 @@ class ShireEstimator(CatEstimator):
             )
         else:
             def _posterior(sedcols, ocols, onoise, oimags, redz, nuvks):
-                return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks)
+                return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks[0][0]) # prior is computed for the template without dust
             
             probz_arr = tree_map(
-                lambda sed_tupl: _posterior(sed_tupl[0], observed_colors, observed_noise, observed_imags, self.zgrid, sed_tupl[1][0]),
+                lambda sed_tupl: _posterior(sed_tupl[0], observed_colors, observed_noise, observed_imags, self.zgrid, sed_tupl[1]),
                 templ_tuples,
                 is_leaf=istuple,
             )
