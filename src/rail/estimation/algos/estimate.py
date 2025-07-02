@@ -463,7 +463,7 @@ class ShireEstimator(CatEstimator):
 
     def _val_nz_prior(self, oimag, z, nuvk):
         alpha, z0, km = self.prior_alpha(nuvk), self.prior_z0(nuvk), self.prior_km(nuvk)
-        val_prior = nz_func((oimag, z), z0, alpha, km, self.modeldict["m0"] )
+        val_prior = nz_func((oimag, z), z0, alpha, km, self.modeldict["mo"] )
         return val_prior
 
     vmap_nz_gals = vmap(_val_nz_prior, in_axes=(None, 0, None, None))
@@ -472,7 +472,7 @@ class ShireEstimator(CatEstimator):
 
     def _val_frac_prior(self, oimag, nuvk):
         fo, kt = self.prior_fo(nuvk), self.prior_kt(nuvk)
-        val_prior = frac_func((fo, kt), self.modeldict["m0"], oimag)
+        val_prior = frac_func((fo, kt), self.modeldict["mo"], oimag)
         return val_prior
 
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None))
