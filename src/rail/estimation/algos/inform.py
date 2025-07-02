@@ -191,6 +191,7 @@ class ShireInformer(CatInformer):
         self.pzs = None
         self.refcategs = np.array(self.config.refcategs)
         self.ntyp = len(self.refcategs)
+        self.nt_array = None
         self.besttypes = None
         self.templates_df = None
         self.filters_names = None
@@ -664,7 +665,7 @@ class ShireInformer(CatInformer):
             a_arr=np.array(res_classif[1]),
             km_arr=np.array(res_classif[2]),
             mo=self.m0,
-            nt_array=None
+            nt_array=self.nt_array
         )
         self.e0_pars = PriorParams(
             0,
@@ -880,6 +881,7 @@ class ShireInformer(CatInformer):
         self._load_training()
         all_tsels_df = self._load_templates()
         all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in self.prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
+        self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NUVK'] == _typ) for _typ in _mod_names ])
         return all_tsels_df
 
 

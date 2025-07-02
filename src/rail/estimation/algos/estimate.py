@@ -460,6 +460,24 @@ class ShireEstimator(CatEstimator):
         )
         return val
 
+
+    @partial(jit, static_argnums=0)
+    def prior_mod(self, nuvk):
+        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: Model Id
+        :rtype: int
+        """
+        val = (
+            self.irr_pars.mod
+            + (self.scd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
+            + (self.sbc_pars.mod - self.scd_pars.mod) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
+            + (self.e0_pars.mod - self.sbc_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val.astype(int)
+
     @partial(jit, static_argnums=0)
     def _val_nz_prior(self, oimag, z, nuvk):
         alpha, z0, km = self.prior_alpha(nuvk), self.prior_z0(nuvk), self.prior_km(nuvk)
@@ -471,7 +489,7 @@ class ShireEstimator(CatEstimator):
 
     @partial(jit, static_argnums=0)
     def _val_frac_prior(self, oimag, nuvk):
-        fo, kt = self.prior_fo(nuvk), self.prior_kt(nuvk)
+        fo, kt = self.prior_fo(nuvk) / self.modeldict['nt_array'][self.prior_mod(nuvk)], self.prior_kt(nuvk)
         val_prior = frac_func((fo, kt), self.modeldict["mo"], oimag)
         return val_prior
 
