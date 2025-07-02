@@ -478,13 +478,20 @@ class ShireEstimator(CatEstimator):
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None))
 
 
+    def _val_prior(self, oimag, z, nuvk):
+        nzval = self._val_nz_prior(oimag, z, nuvk)
+        fracval = self._val_frac_prior(oimag, nuvk)
+        return nzval*fracval
+
+
     def _val_prior_gals(self, oimags, z, nuvk):
         nzval = self.vmap_nz_gals(oimags, z, nuvk)
         fracval = self.vmap_frac_gals(oimags, nuvk)
-        norm = jnp.sum(fracval)
-        return nzval*fracval/norm
+        return nzval*fracval
 
-    vmap_prior_z = vmap(_val_prior_gals, in_axes=(None, None, 0, None))
+
+    vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None))
+    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, None))
 
 
     def _prior(self, oimags, redz, nuvk):
