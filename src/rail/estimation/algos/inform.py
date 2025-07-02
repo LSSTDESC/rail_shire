@@ -388,16 +388,13 @@ class ShireInformer(CatInformer):
         probs = probs / norms
         probsel = probs[self.besttypes, jnp.arange(len(self.besttypes))]
         likelihood = jnp.where(probsel>0, -jnp.log(probsel), 0)
-        return jnp.sum(likelihood)
+        return jnp.nansum(likelihood)
 
 
     @partial(jit, static_argnums=0)
-    def _dn_dz_likelihood(self, pars):
-        marr = self.refmags[self.typmask]
-        marr = jnp.where(marr<self.m0, self.m0, marr)
-        zarr = self.szs[self.typmask]
-        lik = vmap_dndz_gals((marr, zarr), *pars, self.m0)
-        nllik = jnp.sum(jnp.where(lik>0, -jnp.log(lik), 0))
+    def _dn_dz_likelihood(self, pars, mags, zs):
+        lik = vmap_dndz_gals((mags, zs), *pars, self.m0)
+        nllik = jnp.nansum(jnp.where(lik>0, -jnp.log(lik), 0))
         return nllik
 
     #@partial(jit, static_argnums=0)
@@ -439,10 +436,13 @@ class ShireInformer(CatInformer):
         print("Fitting prior parameters...")
         for i in range(self.ntyp):
             print(f"minimizing for type {i}")
-            self.typmask = tuple(b == i for b in self.besttypes)
+            typmask = jnp.array([b == i for b in self.besttypes])
+            _m = self.refmags[typmask]
+            marr = jnp.where(_m<self.m0, self.m0, _m)
+            zarr = self.szs[typmask]
             dndzparams = jnp.array([self.config.init_z0, self.config.init_alpha, self.config.init_km])
             zoi, alfi, kmi = sciop.minimize(
-                self._dn_dz_likelihood,
+                lambda P: self._dn_dz_likelihood(P, marr, zarr),
                 dndzparams,
                 method="Nelder-Mead",
                 bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf)]
