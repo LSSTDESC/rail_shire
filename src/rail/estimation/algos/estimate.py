@@ -488,27 +488,27 @@ class ShireEstimator(CatEstimator):
     vmap_nz_z = vmap(vmap_nz_gals, in_axes=(None, None, 0, None))
 
     @partial(jit, static_argnums=0)
-    def _val_frac_prior(self, oimag, nuvk):
-        fo, kt = self.prior_fo(nuvk) / self.modeldict['nt_array'][self.prior_mod(nuvk)], self.prior_kt(nuvk)
-        val_prior = frac_func((fo, kt), self.modeldict["mo"], oimag)
+    def _val_frac_prior(self, oimag, nuvk, nt):
+        fo, kt = self.prior_fo(nuvk), self.prior_kt(nuvk)
+        val_prior = frac_func((fo/nt, kt), self.modeldict["mo"], oimag)
         return val_prior
 
-    vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None))
+    vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None, None))
 
 
     @partial(jit, static_argnums=0)
-    def _val_prior(self, oimag, z, nuvk):
+    def _val_prior(self, oimag, z, nuvk, nt):
         nzval = self._val_nz_prior(oimag, z, nuvk)
-        fracval = self._val_frac_prior(oimag, nuvk)
+        fracval = self._val_frac_prior(oimag, nuvk, nt)
         return nzval*fracval
 
 
-    vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None))
-    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, None))
+    vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None, None))
+    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, None, None))
 
     @partial(jit, static_argnums=0)
-    def _prior(self, oimags, redz, nuvk):
-        vals = self.vmap_prior_z(oimags, redz, nuvk)
+    def _prior(self, oimags, redz, nuvk, nt):
+        vals = self.vmap_prior_z(oimags, redz, nuvk, nt)
         norm = trapezoid(vals, x=redz, axis=0)
         return vals/norm
 
@@ -523,7 +523,8 @@ class ShireEstimator(CatEstimator):
             )
         else:
             def _posterior(sedcols, ocols, onoise, oimags, redz, nuvks):
-                return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks[0][0]) # prior is computed for the template without dust
+                nt = self.prior_mod(nuvks[0][0])
+                return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks[0][0], nt) # prior is computed for the template without dust
             
             probz_arr = tree_map(
                 lambda sed_tupl: _posterior(sed_tupl[0], observed_colors, observed_noise, observed_imags, self.zgrid, sed_tupl[1]),
