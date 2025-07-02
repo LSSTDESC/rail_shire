@@ -460,7 +460,7 @@ class ShireEstimator(CatEstimator):
         )
         return val
 
-
+    @partial(jit, static_argnums=0)
     def _val_nz_prior(self, oimag, z, nuvk):
         alpha, z0, km = self.prior_alpha(nuvk), self.prior_z0(nuvk), self.prior_km(nuvk)
         val_prior = nz_func((oimag, z), z0, alpha, km, self.modeldict["mo"] )
@@ -469,7 +469,7 @@ class ShireEstimator(CatEstimator):
     vmap_nz_gals = vmap(_val_nz_prior, in_axes=(None, 0, None, None))
     vmap_nz_z = vmap(vmap_nz_gals, in_axes=(None, None, 0, None))
 
-
+    @partial(jit, static_argnums=0)
     def _val_frac_prior(self, oimag, nuvk):
         fo, kt = self.prior_fo(nuvk), self.prior_kt(nuvk)
         val_prior = frac_func((fo, kt), self.modeldict["mo"], oimag)
@@ -478,22 +478,17 @@ class ShireEstimator(CatEstimator):
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None))
 
 
+    @partial(jit, static_argnums=0)
     def _val_prior(self, oimag, z, nuvk):
         nzval = self._val_nz_prior(oimag, z, nuvk)
         fracval = self._val_frac_prior(oimag, nuvk)
         return nzval*fracval
 
 
-    def _val_prior_gals(self, oimags, z, nuvk):
-        nzval = self.vmap_nz_gals(oimags, z, nuvk)
-        fracval = self.vmap_frac_gals(oimags, nuvk)
-        return nzval*fracval
-
-
     vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None))
     vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, None))
 
-
+    @partial(jit, static_argnums=0)
     def _prior(self, oimags, redz, nuvk):
         vals = self.vmap_prior_z(oimags, redz, nuvk)
         norm = trapezoid(vals, x=redz, axis=0)
@@ -509,8 +504,11 @@ class ShireEstimator(CatEstimator):
                 is_leaf=istuple,
             )
         else:
+            def _posterior(sedcols, ocols, onoise, oimags, redz, nuvks):
+                return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks)
+            
             probz_arr = tree_map(
-                lambda sed_tupl: likelihood(sed_tupl[0], observed_colors, observed_noise) * self._prior(observed_imags, self.zgrid, sed_tupl[1]),
+                lambda sed_tupl: _posterior(sed_tupl[0], observed_colors, observed_noise, observed_imags, self.zgrid, sed_tupl[1][0]),
                 templ_tuples,
                 is_leaf=istuple,
             )
