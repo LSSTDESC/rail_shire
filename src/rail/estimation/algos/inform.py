@@ -2,12 +2,13 @@ import os
 import jax
 import numpy as np
 from collections import namedtuple
+from functools import partial
 from jax import numpy as jnp
 from jax import jit, vmap
 from jax.tree_util import tree_map
 from jax.scipy.special import gamma as jgamma
-from jax.scipy.optimize import minimize as jmini
-#import scipy.optimize as sciop
+#from jax.scipy.optimize import minimize as jmini
+import scipy.optimize as sciop
 #from jax import random as jrn
 
 import pandas as pd
@@ -49,15 +50,15 @@ from .template import (
     vmap_calc_eqw
 )
 from .filter import get_sedpy
-from .cosmology import prior_mod
+#from .cosmology import prior_mod
 
 jax.config.update("jax_enable_x64", True)
 
-PriorParams = namedtuple("PriorParams", ["type", "fo", "kt", "z0", "alpha", "km", "nuv_range"])
+PriorParams = namedtuple("PriorParams", ["mod", "type", "fo", "kt", "z0", "alpha", "km", "nuv_range"])
 
 @jit
-def nz_func(mz, X, m0):  # pragma: no cover
-    z0, alpha, km = X
+def nz_func(mz, z0, alpha, km, m0):  # pragma: no cover
+    #z0, alpha, km = X
     m, z = mz
     zm = z0 + (km * (m - m0))
     vals = jnp.power(z, alpha) * jnp.exp(- jnp.power((z / zm), alpha))
@@ -66,15 +67,15 @@ def nz_func(mz, X, m0):  # pragma: no cover
 
 vmap_dndz_gals = vmap(
     nz_func,
-    in_axes=(0, None, None)
+    in_axes=(0, None, None, None, None)
 )
 
 vmap_dndz = vmap(
     vmap(
         nz_func,
-        in_axes=(0, None, None)
+        in_axes=(0, None, None, None, None)
     ),
-    in_axes=(None, 0, None)
+    in_axes=(None, 0, 0, 0, None)
 )
 
 @jit
@@ -194,10 +195,27 @@ class ShireInformer(CatInformer):
         self.templates_df = None
         self.filters_names = None
         self.color_names = None
-        self.e0_pars = PriorParams(self.refcategs[0], None, None, None, None, None, (4.25, jnp.inf))
-        self.sbc_pars = PriorParams(self.refcategs[1], None, None, None, None, None, (3.19, 4.25))
-        self.scd_pars = PriorParams(self.refcategs[2], None, None, None, None, None, (1.9, 3.19))
-        self.irr_pars = PriorParams(self.refcategs[3], None, None, None, None, None, (-jnp.inf, 1.9))
+        self.e0_pars = PriorParams(0, self.refcategs[0], None, None, None, None, None, (4.25, jnp.inf))
+        self.sbc_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, (3.19, 4.25))
+        self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, (1.9, 3.19))
+        self.irr_pars = PriorParams(3, self.refcategs[3], None, None, None, None, None, (-jnp.inf, 1.9))
+
+    @partial(jit, static_argnums=0)
+    def prior_mod(self, nuvk):
+        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: Model Id
+        :rtype: int
+        """
+        val = (
+            self.irr_pars.mod
+            + (self.scd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
+            + (self.sbc_pars.mod - self.scd_pars.mod) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
+            + (self.e0_pars.mod - self.sbc_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val.astype(int)
 
 
     def open_templates(self, **kwargs):
@@ -359,28 +377,30 @@ class ShireInformer(CatInformer):
         return all_templs_df
 
 
-    #@partial(jit, static_argnums=(0)) #, 2, 3))
+    @partial(jit, static_argnums=0) #, 2, 3))
     def _frac_likelihood(self, frac_params): #, btyp, idxbtyp):
         _foi = frac_params[:self.ntyp]
         _kti = frac_params[self.ntyp:]
         X = (_foi, _kti) #jnp.vstack((_foi, _kti)).T
-        probs = vmap_frac(X, self.m0, self.refmags)
+        mags = jnp.where(self.refmags<self.m0, self.m0, self.refmags)
+        probs = vmap_frac(X, self.m0, mags)
         norms = jnp.sum(probs, axis=0)
         probs = probs / norms
         probsel = probs[self.besttypes, jnp.arange(len(self.besttypes))]
-        likelihood = jnp.where(probsel>0, -2. * jnp.log10(probsel), 0)
+        likelihood = jnp.where(probsel>0, -jnp.log(probsel), 0)
         return jnp.sum(likelihood)
 
 
-    #@partial(jit, static_argnums=(0))
+    @partial(jit, static_argnums=0)
     def _dn_dz_likelihood(self, pars):
         marr = self.refmags[self.typmask]
+        marr = jnp.where(marr<self.m0, self.m0, marr)
         zarr = self.szs[self.typmask]
-        lik = vmap_dndz_gals((marr, zarr), pars, self.m0)
+        lik = vmap_dndz_gals((marr, zarr), *pars, self.m0)
         nllik = jnp.sum(jnp.where(lik>0, -jnp.log(lik), 0))
         return nllik
 
-    #@partial(jit, static_argnums=(0))
+    #@partial(jit, static_argnums=0)
     def _find_fractions(self):
         # set up fo and kt arrays, choose default start values
         fo_init = jnp.full(self.ntyp, 1/self.ntyp)
@@ -389,9 +409,19 @@ class ShireInformer(CatInformer):
         print("Finding fractions...")
         # run scipy optimize to find best params
         # note that best fit vals are stored as "x" for some reason
+        '''
         frac_results = jmini(
             self._frac_likelihood, fracparams,
             method="BFGS"
+        ).x
+        '''
+        frac_results = sciop.minimize(
+            self._frac_likelihood, fracparams,
+            method="Nelder-Mead",
+            bounds=[
+                (0, 1), (0, 1), (0, 1), (0, 1),
+                (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
+            ]
         ).x
         tmpfo = frac_results[:self.ntyp]
         # minimizer can sometimes give fractions greater than one, if so normalize
@@ -400,7 +430,7 @@ class ShireInformer(CatInformer):
         self.kt_arr = frac_results[self.ntyp:]
 
 
-    #@partial(jit, static_argnums=(0))
+    #@partial(jit, static_argnums=0)
     def _find_dndz_params(self):
         # initial parameters for zo, alpha, and km
         zo_arr = []
@@ -411,7 +441,12 @@ class ShireInformer(CatInformer):
             print(f"minimizing for type {i}")
             self.typmask = tuple(b == i for b in self.besttypes)
             dndzparams = jnp.array([self.config.init_z0, self.config.init_alpha, self.config.init_km])
-            zoi, alfi, kmi = jmini(self._dn_dz_likelihood, dndzparams, method="BFGS").x
+            zoi, alfi, kmi = sciop.minimize(
+                self._dn_dz_likelihood,
+                dndzparams,
+                method="Nelder-Mead",
+                bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf)]
+            ).x
             zo_arr.append(zoi)
             a_arr.append(alfi)
             km_arr.append(kmi)
@@ -437,22 +472,23 @@ class ShireInformer(CatInformer):
         #fracs = jnp.array([ycounts[np.argwhere(yvals==refcat)[0]]/ytest.shape[0] for refcat in refcategs])
         #self.fo_arr = fracs
         self._find_fractions()
+        z0list, alflist, kmlist = self._find_dndz_params()
 
-        """
+        '''
         print("Fitting prior parameters...")
         z0list = []
         alflist = []
         kmlist = []
         for cat in self.refcategs:
+            print(f"Fitting type {cat}")
             subdf = test_df[test_df['CAT_NUVK']==cat]
             m_i = jnp.array(subdf[self.config.ref_band].values)
             zs = jnp.array(subdf[self.config.redshift_col].values)
             _nz, _bins = jnp.histogram(zs, bins=self.pzs, density=True)
             nz = jnp.array([_nz[nbin] for nbin in jnp.digitize(zs, _bins)])
-            print(m_i.shape, zs.shape, nz.shape)
             z0, alpha, km = sciop.curve_fit(
-                lambda mz, P : vmap_dndz_gals(mz, P, self.m0),
-                (m_i, zs),
+                lambda mz, _z0, _alf, _km : vmap_dndz_gals(mz, _z0, _alf, _km, self.m0),
+                jnp.vstack((m_i, zs)).T,
                 nz,
                 p0=(self.config.init_z0, self.config.init_alpha, self.config.init_km)
             )[0]
@@ -460,9 +496,7 @@ class ShireInformer(CatInformer):
             alflist.append(alpha)
             kmlist.append(km)
             print(f"best fit z0, alpha, km for type {cat}: {z0, alpha, km}")
-        """
-
-        z0list, alflist, kmlist = self._find_dndz_params()
+        '''
 
         return z0list, alflist, kmlist #jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist)
 
@@ -845,7 +879,7 @@ class ShireInformer(CatInformer):
         _mod_names = ["E_S0", "Sbc", "Scd", "Irr"]
         self._load_training()
         all_tsels_df = self._load_templates()
-        all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
+        all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in self.prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
         return all_tsels_df
 
 
