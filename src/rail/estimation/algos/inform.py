@@ -7,7 +7,7 @@ from jax import numpy as jnp
 from jax import jit, vmap
 from jax.tree_util import tree_map
 from jax.scipy.special import gamma as jgamma
-from jax.scipy.optimize import minimize as jmini
+#from jax.scipy.optimize import minimize as jmini
 import scipy.optimize as sciop
 #from jax import random as jrn
 
@@ -62,7 +62,7 @@ def nz_func(mz, z0, alpha, km, m0):  # pragma: no cover
     m, z = mz
     zm = z0 + (km * (m - m0))
     vals = jnp.power(z, alpha) * jnp.exp(- jnp.power((z / zm), alpha))
-    Inorm = jnp.power(zm, alpha) * jgamma(1 + 1 / alpha) / alpha
+    Inorm = jnp.power(zm, alpha+1) * jgamma(1 + 1 / alpha) / alpha
     return vals / Inorm
 
 vmap_dndz_gals = vmap(
@@ -170,7 +170,7 @@ class ShireInformer(CatInformer):
         init_z0=Param(float, 0.4, msg="initial guess for z0 in training"),
         init_alpha=Param(float, 1.8, msg="initial guess for alpha in training"),
         init_km=Param(float, 0.1, msg="initial guess for km in training"),
-        refcategs=Param(list, ["E_S0", "Sbc", "Scd", "Irr"], msg="Galaxy types for prior functions.")
+        refcategs=Param(list, ["E_S0", "Sbc/Scd", "Irr"], msg="Galaxy types for prior functions.")
     )
 
     def __init__(self, args, **kwargs):
@@ -201,9 +201,10 @@ class ShireInformer(CatInformer):
         self.filters_names = None
         self.color_names = None
         self.e0_pars = PriorParams(0, self.refcategs[0], None, None, None, None, None, (4.25, jnp.inf))
-        self.sbc_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, (3.19, 4.25))
-        self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, (1.9, 3.19))
-        self.irr_pars = PriorParams(3, self.refcategs[3], None, None, None, None, None, (-jnp.inf, 1.9))
+        self.sbcd_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, (1.9, 4.25))
+        #self.sbc_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, (3.1.9, 4.25))
+        #self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, (1.9, 3.19))
+        self.irr_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, (-jnp.inf, 1.9))
 
     @partial(jit, static_argnums=0)
     def prior_mod(self, nuvk):
@@ -216,9 +217,8 @@ class ShireInformer(CatInformer):
         """
         val = (
             self.irr_pars.mod
-            + (self.scd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
-            + (self.sbc_pars.mod - self.scd_pars.mod) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
-            + (self.e0_pars.mod - self.sbc_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+            + (self.sbcd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.mod - self.sbcd_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
         )
         return val.astype(int)
 
@@ -414,11 +414,7 @@ class ShireInformer(CatInformer):
             method="BFGS"
         ).x
         '''
-        
-        def foconstr(X):
-            fo = X[:self.ntyp]
-            return jnp.nansum(fo)
-        
+
         foconstrmatrx = jnp.vstack(
             (
                 jnp.concatenate((jnp.ones_like(fo_init), jnp.zeros_like(kt_init))),
@@ -431,6 +427,11 @@ class ShireInformer(CatInformer):
                 )
             )
         )
+
+        lb = jnp.concatenate(
+            (jnp.ones(1), jnp.zeros(foconstrmatrx.shape[0]-1))
+        )
+        ub = jnp.ones(foconstrmatrx.shape[0])
         
         minmags = jnp.where(self.refmags<self.m0, self.m0, self.refmags)
         def funconstr(X):
@@ -440,7 +441,7 @@ class ShireInformer(CatInformer):
         
         frac_results = sciop.minimize(
             lambda P: self._frac_likelihood(P, minmags), fracparams,
-            method="COBYQA",
+            method="COBYQA",# "Nelder-Mead", #
             #bounds=[
             #    (0, 1), (0, 1), (0, 1), (0, 1),
             #    (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
@@ -448,13 +449,10 @@ class ShireInformer(CatInformer):
             constraints=[
                 sciop.LinearConstraint(
                     foconstrmatrx,
-                    jnp.concatenate(
-                        (jnp.ones(1), jnp.zeros(fracparams.shape[0]-1))
-                    ),
-                    jnp.ones(fracparams.shape[0])
+                    lb,
+                    ub
                 ),
-                #sciop.NonlinearConstraint(foconstr, 1.0, 1.0),
-                sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags))
+            #    sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags))
             ]
         ).x
         tmpfo = frac_results[:self.ntyp]
@@ -478,10 +476,26 @@ class ShireInformer(CatInformer):
             marr = jnp.where(_m<self.m0, self.m0, _m)
             zarr = self.szs[typmask]
             dndzparams = jnp.array([self.config.init_z0, self.config.init_alpha, self.config.init_km])
-            zoi, alfi, kmi = jmini(
+            Aconstraint = jnp.array(
+                [
+                    [1, 0, 0],
+                    [0, 0, 0],
+                    [0, 0, 0]
+                ]
+            )
+            lb = jnp.array([0, 0, 0])
+            ub = jnp.array([jnp.inf, 0, 0])
+            zoi, alfi, kmi = sciop.minimize(
                 lambda P: self._dn_dz_likelihood(P, marr, zarr),
                 dndzparams,
-                method="BFGS",
+                method="COBYQA",
+                constraints=(
+                    sciop.LinearConstraint(
+                        Aconstraint,
+                        lb,
+                        ub
+                    )
+                )
                 #bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf)]
             ).x
             zo_arr.append(zoi)
@@ -713,7 +727,7 @@ class ShireInformer(CatInformer):
             self.model["km_arr"][0],
             (4.25, jnp.inf)
         )
-        self.sbc_pars = PriorParams(
+        self.sbcd_pars = PriorParams(
             1,
             self.refcategs[1],
             self.model["fo_arr"][1],
@@ -721,9 +735,29 @@ class ShireInformer(CatInformer):
             self.model["zo_arr"][1],
             self.model["a_arr"][1],
             self.model["km_arr"][1],
-            (3.19, 4.25)
+            (1.9, 4.25)
         )
-        self.scd_pars = PriorParams(
+        # self.sbc_pars = PriorParams(
+        #     1,
+        #     self.refcategs[1],
+        #     self.model["fo_arr"][1],
+        #     self.model["kt_arr"][1],
+        #     self.model["zo_arr"][1],
+        #     self.model["a_arr"][1],
+        #     self.model["km_arr"][1],
+        #     (3.19, 4.25)
+        # )
+        # self.scd_pars = PriorParams(
+        #     2,
+        #     self.refcategs[2],
+        #     self.model["fo_arr"][2],
+        #     self.model["kt_arr"][2],
+        #     self.model["zo_arr"][2],
+        #     self.model["a_arr"][2],
+        #     self.model["km_arr"][2],
+        #     (1.9, 3.19)
+        # )
+        self.irr_pars = PriorParams(
             2,
             self.refcategs[2],
             self.model["fo_arr"][2],
@@ -731,16 +765,6 @@ class ShireInformer(CatInformer):
             self.model["zo_arr"][2],
             self.model["a_arr"][2],
             self.model["km_arr"][2],
-            (1.9, 3.19)
-        )
-        self.irr_pars = PriorParams(
-            3,
-            self.refcategs[3],
-            self.model["fo_arr"][3],
-            self.model["kt_arr"][3],
-            self.model["zo_arr"][3],
-            self.model["a_arr"][3],
-            self.model["km_arr"][3],
             (-jnp.inf, 1.9)
         )
         

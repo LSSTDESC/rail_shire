@@ -134,8 +134,9 @@ class ShireEstimator(CatEstimator):
         self.avgrid=None
         self.templates=None
         self.e0_pars = None
-        self.sbc_pars = None
-        self.scd_pars = None
+        self.sbcd_pars = None
+        # self.sbc_pars = None
+        # self.scd_pars = None
         self.irr_pars = None
 
     def _initialize_run(self):
@@ -175,7 +176,7 @@ class ShireEstimator(CatEstimator):
             self.modeldict["km_arr"][0],
             (4.25, jnp.inf)
         )
-        self.sbc_pars = PriorParams(
+        self.sbcd_pars = PriorParams(
             1,
             "Sbc",
             self.modeldict["fo_arr"][1],
@@ -183,26 +184,36 @@ class ShireEstimator(CatEstimator):
             self.modeldict["zo_arr"][1],
             self.modeldict["a_arr"][1],
             self.modeldict["km_arr"][1],
-            (3.19, 4.25)
+            (1.9, 4.25)
         )
-        self.scd_pars = PriorParams(
+        # self.sbc_pars = PriorParams(
+        #     1,
+        #     "Sbc",
+        #     self.modeldict["fo_arr"][1],
+        #     self.modeldict["kt_arr"][1],
+        #     self.modeldict["zo_arr"][1],
+        #     self.modeldict["a_arr"][1],
+        #     self.modeldict["km_arr"][1],
+        #     (3.19, 4.25)
+        # )
+        # self.scd_pars = PriorParams(
+        #     2,
+        #     "Scd",
+        #     self.modeldict["fo_arr"][2],
+        #     self.modeldict["kt_arr"][2],
+        #     self.modeldict["zo_arr"][2],
+        #     self.modeldict["a_arr"][2],
+        #     self.modeldict["km_arr"][2],
+        #     (1.9, 3.19)
+        # )
+        self.irr_pars = PriorParams(
             2,
-            "Scd",
+            "Irr",
             self.modeldict["fo_arr"][2],
             self.modeldict["kt_arr"][2],
             self.modeldict["zo_arr"][2],
             self.modeldict["a_arr"][2],
             self.modeldict["km_arr"][2],
-            (1.9, 3.19)
-        )
-        self.irr_pars = PriorParams(
-            3,
-            "Irr",
-            self.modeldict["fo_arr"][3],
-            self.modeldict["kt_arr"][3],
-            self.modeldict["zo_arr"][3],
-            self.modeldict["a_arr"][3],
-            self.modeldict["km_arr"][3],
             (-jnp.inf, 1.9)
         )
 
@@ -382,9 +393,8 @@ class ShireEstimator(CatEstimator):
         """
         val = (
             self.irr_pars.z0
-            + (self.scd_pars.z0 - self.irr_pars.z0) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
-            + (self.sbc_pars.z0 - self.scd_pars.z0) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
-            + (self.e0_pars.z0 - self.sbc_pars.z0) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+            + (self.sbcd_pars.z0 - self.irr_pars.z0) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.z0 - self.sbcd_pars.z0) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
         )
         return val
 
@@ -400,9 +410,8 @@ class ShireEstimator(CatEstimator):
         """
         val = (
             self.irr_pars.alpha
-            + (self.scd_pars.alpha - self.irr_pars.alpha) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
-            + (self.sbc_pars.alpha - self.scd_pars.alpha) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
-            + (self.e0_pars.alpha - self.sbc_pars.alpha) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+            + (self.sbcd_pars.alpha - self.irr_pars.alpha) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.alpha - self.sbcd_pars.alpha) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
         )
         return val
 
@@ -418,9 +427,8 @@ class ShireEstimator(CatEstimator):
         """
         val = (
             self.irr_pars.km
-            + (self.scd_pars.km - self.irr_pars.km) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
-            + (self.sbc_pars.km - self.scd_pars.km) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
-            + (self.e0_pars.km - self.sbc_pars.km) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+            + (self.sbcd_pars.km - self.irr_pars.km) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.km - self.sbcd_pars.km) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
         )
         return val
 
@@ -436,9 +444,8 @@ class ShireEstimator(CatEstimator):
         """
         val = (
             self.irr_pars.fo
-            + (self.scd_pars.fo - self.irr_pars.fo) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
-            + (self.sbc_pars.fo - self.scd_pars.fo) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
-            + (self.e0_pars.fo - self.sbc_pars.fo) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+            + (self.sbcd_pars.fo - self.irr_pars.fo) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.fo - self.sbcd_pars.fo) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
         )
         return val
 
@@ -454,9 +461,8 @@ class ShireEstimator(CatEstimator):
         """
         val = (
             self.irr_pars.kt
-            + (self.scd_pars.kt - self.irr_pars.kt) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
-            + (self.sbc_pars.kt - self.scd_pars.kt) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
-            + (self.e0_pars.kt - self.sbc_pars.kt) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+            + (self.sbcd_pars.kt - self.irr_pars.kt) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.kt - self.sbcd_pars.kt) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
         )
         return val
 
@@ -472,9 +478,8 @@ class ShireEstimator(CatEstimator):
         """
         val = (
             self.irr_pars.mod
-            + (self.scd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.scd_pars.nuv_range[0], 0)
-            + (self.sbc_pars.mod - self.scd_pars.mod) * jnp.heaviside(nuvk - self.sbc_pars.nuv_range[0], 0)
-            + (self.e0_pars.mod - self.sbc_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+            + (self.sbcd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.mod - self.sbcd_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
         )
         return val.astype(int)
 
