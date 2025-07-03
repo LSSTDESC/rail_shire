@@ -79,6 +79,7 @@ vmap_dndz = vmap(
     in_axes=(None, 0, 0, 0, 0)
 )
 
+
 @jit
 def frac_func(X, m0, m):
     fo, kt = X
@@ -401,28 +402,82 @@ class ShireInformer(CatInformer):
         lik = vmap_dndz_gals((mags, zs), *pars)
         nllik = jnp.nansum(jnp.where(lik>0, -jnp.log(lik), 0))
         return nllik
-    
-    
+
+
+    @partial(jit, static_argnums=0)
+    def _dn_dz_likelihood_combined(self, pars, mags, zs):
+        _zoi, _alphai, _kmi, _moi = pars[:self.ntyp], pars[self.ntyp:2*self.ntyp], pars[2*self.ntyp:3*self.ntyp], pars[3*self.ntyp:]
+        lik = vmap_dndz((mags, zs), _zoi, _alphai, _kmi, _moi)
+        liksel = lik[self.besttypes, jnp.arange(len(self.besttypes))]
+        nllik = jnp.nansum(jnp.where(liksel>0, -jnp.log(lik), 0))
+        return nllik
+
+    @partial(jit, static_argnums=0)
+    def _combined_nllik(self, pars, mags, zs):
+        fracpars = pars[:2*self.ntyp]
+        dnzpars = pars[2*self.ntyp:]
+        return self._frac_likelihood(fracpars, mags)+self._dn_dz_likelihood_combined(dnzpars, mags, zs)
+
+
     def _fit_prior(self):
         fo_init = jnp.full(self.ntyp, 1/self.ntyp)
         kt_init = jnp.full(self.ntyp, self.config.init_kt)
-        fracparams = jnp.concatenate((fo_init, kt_init))
-        foconstrmatrx = jnp.vstack(
+        z0_init = jnp.full(self.ntyp, self.config.init_z0)
+        al_init = jnp.full(self.ntyp, self.config.init_alpha)
+        km_init = jnp.full(self.ntyp, self.config.init_km)
+        m0_init = jnp.full(self.ntyp, self.config.init_m0)
+        
+        initparams = jnp.concatenate(
+            (fo_init, kt_init, z0_init, al_init, km_init, m0_init)
+        )
+
+        constrmatrx = jnp.vstack(
             (
-                jnp.concatenate((jnp.ones_like(fo_init), jnp.zeros_like(kt_init))),
+                jnp.concatenate(
+                    (jnp.ones(self.ntyp), jnp.zeros(initparams.shape[0]-self.ntyp))
+                ),
                 jnp.concatenate(
                     (
                         jnp.identity(self.ntyp),
-                        jnp.zeros((self.ntyp, self.ntyp))
+                        jnp.zeros((self.ntyp, initparams.shape[0]-self.ntyp))
                     ),
                     axis=1
-                )
+                ),
+                jnp.zeros((initparams.shape[0]-2*self.ntyp, initparams.shape[0]))
             )
         )
         lb = jnp.concatenate(
-            (jnp.ones(1), jnp.zeros(foconstrmatrx.shape[0]-1))
+            (jnp.ones(1), jnp.zeros(constrmatrx.shape[0]-1))
         )
-        ub = jnp.ones(foconstrmatrx.shape[0])
+        ub = jnp.concatenate(
+            (jnp.ones(2*self.ntyp), jnp.zeros(constrmatrx.shape[0]-2*self.ntyp))
+        )
+        _results = sciop.minimize(
+            lambda P: self._combined_nllik(P, self.refmags, self.szs), initparams,
+            method="COBYQA",# "Nelder-Mead", #
+            #bounds=[
+            #    (0, 1), (0, 1), (0, 1), (0, 1),
+            #    (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
+            #],
+            constraints=[
+                sciop.LinearConstraint(
+                    constrmatrx,
+                    lb,
+                    ub
+                ),
+            #    sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags))
+            ]
+        ).x
+        tmpfo = _results[:self.ntyp]
+        # minimizer can sometimes give fractions greater than one, if so normalize
+        fracnorm = jnp.sum(tmpfo)
+        self.fo_arr = tmpfo/fracnorm
+        self.kt_arr = _results[self.ntyp:2*self.ntyp]
+        self.m0 = _results[-self.ntyp:]
+        zo_arr = _results[2*self.ntyp:3*self.ntyp]
+        alpha_arr = _results[3*self.ntyp:4*self.ntyp]
+        km_arr = _results[4*self.ntyp:-self.ntyp]
+        return zo_arr, alpha_arr, km_arr
         #return None
 
 
@@ -549,11 +604,13 @@ class ShireInformer(CatInformer):
         test_df['CAT_NUVK'] = ytest
         self.besttypes = [np.argwhere(self.refcategs==cat)[0][0] for cat in ytest]
 
+        z0list, alflist, kmlist = self._fit_prior()
+
         #fracs = jnp.array([ycounts[np.argwhere(yvals==refcat)[0]]/ytest.shape[0] for refcat in refcategs])
         #self.fo_arr = fracs
-        z0list, alflist, kmlist, molist = self._find_dndz_params()
-        self.m0 = molist
-        self._find_fractions()
+        #z0list, alflist, kmlist, molist = self._find_dndz_params()
+        #self.m0 = molist
+        #self._find_fractions()
 
         '''
         print("Fitting prior parameters...")
