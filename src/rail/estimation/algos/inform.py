@@ -397,6 +397,18 @@ class ShireInformer(CatInformer):
         return jnp.nansum(likelihood)
 
 
+    @partial(jit, static_argnums=0) #, 2, 3))
+    def _frac_likelihood_combined(self, frac_params, mags): #, btyp, idxbtyp):
+        _foi = frac_params[:self.ntyp]
+        _kti = frac_params[self.ntyp:2*self.ntyp]
+        _moi = frac_params[2*self.ntyp:]
+        X = (_foi, _kti) #jnp.vstack((_foi, _kti)).T
+        probs = vmap_frac(X, _moi, mags)
+        probsel = probs[self.besttypes, jnp.arange(len(self.besttypes))]
+        likelihood = jnp.where(probsel>0, -jnp.log(probsel), 0)
+        return jnp.nansum(likelihood)
+
+
     @partial(jit, static_argnums=0)
     def _dn_dz_likelihood(self, pars, mags, zs):
         lik = vmap_dndz_gals((mags, zs), *pars)
@@ -406,7 +418,7 @@ class ShireInformer(CatInformer):
 
     @partial(jit, static_argnums=0)
     def _dn_dz_likelihood_combined(self, pars, mags, zs):
-        _zoi, _alphai, _kmi, _moi = pars[:self.ntyp], pars[self.ntyp:2*self.ntyp], pars[2*self.ntyp:3*self.ntyp], pars[3*self.ntyp:]
+        _moi, _zoi, _alphai, _kmi = pars[:self.ntyp], pars[self.ntyp:2*self.ntyp], pars[2*self.ntyp:3*self.ntyp], pars[3*self.ntyp:]
         lik = vmap_dndz((mags, zs), _zoi, _alphai, _kmi, _moi)
         liksel = lik[self.besttypes, jnp.arange(len(self.besttypes))]
         nllik = jnp.nansum(jnp.where(liksel>0, -jnp.log(lik), 0))
@@ -414,9 +426,9 @@ class ShireInformer(CatInformer):
 
     @partial(jit, static_argnums=0)
     def _combined_nllik(self, pars, mags, zs):
-        fracpars = pars[:2*self.ntyp]
-        dnzpars = pars[2*self.ntyp:]
-        return self._frac_likelihood(fracpars, mags)+self._dn_dz_likelihood_combined(dnzpars, mags, zs)
+        fracpars = pars[:3*self.ntyp]
+        dnzpars = pars[2*self.ntyp:] # overlap for m0
+        return self._frac_likelihood_combined(fracpars, mags)+self._dn_dz_likelihood_combined(dnzpars, mags, zs)
 
 
     def _fit_prior(self):
@@ -428,7 +440,7 @@ class ShireInformer(CatInformer):
         m0_init = jnp.full(self.ntyp, self.config.init_m0)
         
         initparams = jnp.concatenate(
-            (fo_init, kt_init, z0_init, al_init, km_init, m0_init)
+            (fo_init, kt_init, m0_init, z0_init, al_init, km_init)
         )
 
         constrmatrx = jnp.vstack(
