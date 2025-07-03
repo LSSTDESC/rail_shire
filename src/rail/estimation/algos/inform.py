@@ -404,7 +404,7 @@ class ShireInformer(CatInformer):
         # set up fo and kt arrays, choose default start values
         fo_init = jnp.full(self.ntyp, 1/self.ntyp)
         kt_init = jnp.full(self.ntyp, self.config.init_kt)
-        fracparams = jnp.hstack((fo_init, kt_init))
+        fracparams = jnp.concatenate((fo_init, kt_init))
         print("Finding fractions...")
         # run scipy optimize to find best params
         # note that best fit vals are stored as "x" for some reason
@@ -416,7 +416,7 @@ class ShireInformer(CatInformer):
         '''
         Aconstr = jnp.vstack(
             (
-                jnp.hstack(
+                jnp.concatenate(
                     (jnp.ones_like(fo_init), jnp.zeros_like(kt_init))
                 ),
                 jnp.zeros((fracparams.shape[0]-1, fracparams.shape[0]))
@@ -437,8 +437,12 @@ class ShireInformer(CatInformer):
                 (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
             ],
             constraints=[
-                sciop.LinearConstraint(Aconstr, 1.0, 1.0),
-                sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags)),
+                sciop.LinearConstraint(
+                    Aconstr,
+                    jnp.concatenate((jnp.ones(1), jnp.zeros(fracparams.shape[0]-1))),
+                    jnp.concatenate((jnp.ones(1), jnp.zeros(fracparams.shape[0]-1)))
+                ),
+                sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags))
             ]
         ).x
         tmpfo = frac_results[:self.ntyp]
