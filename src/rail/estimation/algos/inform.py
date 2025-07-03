@@ -485,10 +485,10 @@ class ShireInformer(CatInformer):
         fracnorm = jnp.sum(tmpfo)
         self.fo_arr = tmpfo/fracnorm
         self.kt_arr = _results[self.ntyp:2*self.ntyp]
-        self.m0 = _results[-self.ntyp:]
-        zo_arr = _results[2*self.ntyp:3*self.ntyp]
-        alpha_arr = _results[3*self.ntyp:4*self.ntyp]
-        km_arr = _results[4*self.ntyp:-self.ntyp]
+        self.m0 = _results[2*self.ntyp:3*self.ntyp]
+        zo_arr = _results[3*self.ntyp:4*self.ntyp]
+        alpha_arr = _results[4*self.ntyp:-self.ntyp]
+        km_arr = _results[-self.ntyp:]
         return zo_arr, alpha_arr, km_arr
         #return None
 
