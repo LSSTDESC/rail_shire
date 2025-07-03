@@ -494,13 +494,13 @@ class ShireInformer(CatInformer):
                 lambda P: self._dn_dz_likelihood(P, _m, zarr),
                 dndzparams,
                 method="COBYQA",
-                constraints=(
-                    sciop.LinearConstraint(
-                        Aconstraint,
-                        lb,
-                        ub
-                    )
-                )
+                # constraints=(
+                #     sciop.LinearConstraint(
+                #         Aconstraint,
+                #         lb,
+                #         ub
+                #     )
+                # )
                 #bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf)]
             ).x
             zo_arr.append(zoi)
