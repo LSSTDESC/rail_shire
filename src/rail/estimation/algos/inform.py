@@ -937,7 +937,7 @@ class ShireInformer(CatInformer):
 
 
     def _nuvk_classif(self):
-        _mod_names = ["E_S0", "Sbc", "Scd", "Irr"]
+        _mod_names = self.refcategs
         self._load_training()
         all_tsels_df = self._load_templates()
         all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in self.prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
