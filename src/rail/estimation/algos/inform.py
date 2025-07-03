@@ -432,12 +432,13 @@ class ShireInformer(CatInformer):
 
 
     def _fit_prior(self):
+        print("Fitting prior...")
         fo_init = jnp.full(self.ntyp, 1/self.ntyp)
         kt_init = jnp.full(self.ntyp, self.config.init_kt)
+        m0_init = jnp.full(self.ntyp, self.config.init_m0)
         z0_init = jnp.full(self.ntyp, self.config.init_z0)
         al_init = jnp.full(self.ntyp, self.config.init_alpha)
         km_init = jnp.full(self.ntyp, self.config.init_km)
-        m0_init = jnp.full(self.ntyp, self.config.init_m0)
         
         initparams = jnp.concatenate(
             (fo_init, kt_init, m0_init, z0_init, al_init, km_init)
@@ -457,9 +458,9 @@ class ShireInformer(CatInformer):
                 ),
                 jnp.concatenate(
                     (
-                        jnp.zeros((self.ntyp, 2*self.ntyp)),
+                        jnp.zeros((self.ntyp, 3*self.ntyp)),
                         jnp.identity(self.ntyp),
-                        jnp.zeros((self.ntyp, initparams.shape[0]-3*self.ntyp))
+                        jnp.zeros((self.ntyp, initparams.shape[0]-4*self.ntyp))
                     ),
                     axis=1
                 )
@@ -471,7 +472,7 @@ class ShireInformer(CatInformer):
         ub = jnp.concatenate(
             (jnp.ones(1+self.ntyp), jnp.full(self.ntyp, jnp.inf))
         )
-        print(constrmatrx, lb, ub)
+        print(f"Constraints matrices: {constrmatrx, lb, ub}")
         _results = sciop.minimize(
             lambda P: self._combined_nllik(P, self.refmags, self.szs), initparams,
             method="COBYQA",# "Nelder-Mead", #
@@ -497,6 +498,11 @@ class ShireInformer(CatInformer):
         zo_arr = _results[3*self.ntyp:4*self.ntyp]
         alpha_arr = _results[4*self.ntyp:-self.ntyp]
         km_arr = _results[-self.ntyp:]
+        
+        for i, (ifo, ikt, imo, izo, ial, ikm) in enumerate(zip(
+            self.fo_arr, self.kt_arr, self.m0, zo_arr, alpha_arr, km_arr )):
+            print(f"best fit f0, kt, m0, z0, alpha, km for type {i}: {ifo, ikt, imo, izo, ial, ikm}")
+        
         return zo_arr, alpha_arr, km_arr
         #return None
 
