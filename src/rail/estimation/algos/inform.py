@@ -414,7 +414,12 @@ class ShireInformer(CatInformer):
             method="BFGS"
         ).x
         '''
-        Aconstr = jnp.repeat(jnp.hstack((jnp.ones_like(fo_init), jnp.zeros_like(kt_init))), fracparams.shape[0])
+        Aconstr = jnp.vtask(
+            jnp.hstack(
+                (jnp.ones_like(fo_init), jnp.zeros_like(kt_init))
+            ),
+            jnp.zeros((fracparams.shape[0]-1, fracparams.shape[0]-1))
+        )
         
         minmags = jnp.where(self.refmags<self.m0, self.m0, self.refmags)
         def funconstr(X):
