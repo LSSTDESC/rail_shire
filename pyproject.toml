@@ -18,6 +18,7 @@ dynamic = ["version"]
 
 dependencies = [
     "numpy",
+    "scipy>=1.14.0",
     "astropy",
     "h5py",
     "tqdm",

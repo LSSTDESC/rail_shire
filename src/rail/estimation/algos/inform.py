@@ -419,6 +419,19 @@ class ShireInformer(CatInformer):
             fo = X[:self.ntyp]
             return jnp.nansum(fo)
         
+        foconstrmatrx = jnp.vstack(
+            (
+                jnp.concatenate(jnp.ones_like(fo_init), jnp.zeros_like(kt_init)),
+                jnp.concatenate(
+                    (
+                        jnp.identity(self.ntyp),
+                        jnp.zeros((self.ntyp, self.ntyp))
+                    ),
+                    axis=1
+                )
+            )
+        )
+        
         minmags = jnp.where(self.refmags<self.m0, self.m0, self.refmags)
         def funconstr(X):
             fo, kt = X[:self.ntyp], X[self.ntyp:]
@@ -427,13 +440,20 @@ class ShireInformer(CatInformer):
         
         frac_results = sciop.minimize(
             lambda P: self._frac_likelihood(P, minmags), fracparams,
-            method="COBYQA",
-            bounds=[
-                (0, 1), (0, 1), (0, 1), (0, 1),
-                (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
-            ],
+            method="trust-constr",
+            #bounds=[
+            #    (0, 1), (0, 1), (0, 1), (0, 1),
+            #    (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
+            #],
             constraints=[
-                sciop.NonlinearConstraint(foconstr, 1.0, 1.0),
+                sciop.LinearConstraint(
+                    foconstrmatrx,
+                    jnp.concatenate(
+                        (jnp.ones(1), jnp.zeros(fracparams.shape[0]-1))
+                    ),
+                    jnp.ones(fracparams.shape[0])
+                ),
+                #sciop.NonlinearConstraint(foconstr, 1.0, 1.0),
                 sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags))
             ]
         ).x
