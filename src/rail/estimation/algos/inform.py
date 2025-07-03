@@ -427,7 +427,7 @@ class ShireInformer(CatInformer):
         
         frac_results = sciop.minimize(
             lambda P: self._frac_likelihood(P, minmags), fracparams,
-            method="cobyqa",
+            method="COBYQA",
             bounds=[
                 (0, 1), (0, 1), (0, 1), (0, 1),
                 (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
