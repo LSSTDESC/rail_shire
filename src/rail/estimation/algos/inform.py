@@ -455,15 +455,20 @@ class ShireInformer(CatInformer):
                     ),
                     axis=1
                 ),
-                jnp.zeros((initparams.shape[0]-2*self.ntyp, initparams.shape[0]))
+                jnp.zeros(initparams.shape[0]),
+                jnp.concatenate(
+                    (jnp.zeros(3*self.ntyp), jnp.ones(1), jnp.zeros(initparams.shape[0]-3*self.ntyp-1))
+                ),
+                jnp.zeros((initparams.shape[0]-2*self.ntyp-2, initparams.shape[0]))
             )
         )
         lb = jnp.concatenate(
             (jnp.ones(1), jnp.zeros(constrmatrx.shape[0]-1))
         )
         ub = jnp.concatenate(
-            (jnp.ones(2*self.ntyp), jnp.zeros(constrmatrx.shape[0]-2*self.ntyp))
+            (jnp.ones(2*self.ntyp), jnp.zeros(2), jnp.full(1, jnp.inf), jnp.zeros(constrmatrx.shape[0]-2*self.ntyp-3))
         )
+        print(constrmatrx, lb, ub)
         _results = sciop.minimize(
             lambda P: self._combined_nllik(P, self.refmags, self.szs), initparams,
             method="COBYQA",# "Nelder-Mead", #
