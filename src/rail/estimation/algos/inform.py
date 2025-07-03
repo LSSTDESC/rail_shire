@@ -414,14 +414,10 @@ class ShireInformer(CatInformer):
             method="BFGS"
         ).x
         '''
-        Aconstr = jnp.vstack(
-            (
-                jnp.concatenate(
-                    (jnp.ones_like(fo_init), jnp.zeros_like(kt_init))
-                ),
-                jnp.zeros((fracparams.shape[0]-1, fracparams.shape[0]))
-            )
-        )
+        
+        def foconstr(X):
+            fo = X[:self.ntyp]
+            return jnp.nansum(fo)
         
         minmags = jnp.where(self.refmags<self.m0, self.m0, self.refmags)
         def funconstr(X):
@@ -437,11 +433,7 @@ class ShireInformer(CatInformer):
                 (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
             ],
             constraints=[
-                sciop.LinearConstraint(
-                    Aconstr,
-                    jnp.concatenate((jnp.ones(1), jnp.zeros(fracparams.shape[0]-1))),
-                    jnp.concatenate((jnp.ones(1), jnp.zeros(fracparams.shape[0]-1)))
-                ),
+                sciop.NonlinearConstraint(foconstr, 1.0, 1.0),
                 sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags))
             ]
         ).x
