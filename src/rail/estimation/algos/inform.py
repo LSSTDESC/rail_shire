@@ -455,18 +455,21 @@ class ShireInformer(CatInformer):
                     ),
                     axis=1
                 ),
-                jnp.zeros(initparams.shape[0]),
                 jnp.concatenate(
-                    (jnp.zeros(3*self.ntyp), jnp.ones(1), jnp.zeros(initparams.shape[0]-3*self.ntyp-1))
-                ),
-                jnp.zeros((initparams.shape[0]-2*self.ntyp-2, initparams.shape[0]))
+                    (
+                        jnp.zeros((self.ntyp, 2*self.ntyp)),
+                        jnp.identity(self.ntyp),
+                        jnp.zeros((self.ntyp, initparams.shape[0]-3*self.ntyp))
+                    ),
+                    axis=1
+                )
             )
         )
         lb = jnp.concatenate(
             (jnp.ones(1), jnp.zeros(constrmatrx.shape[0]-1))
         )
         ub = jnp.concatenate(
-            (jnp.ones(2*self.ntyp), jnp.zeros(2), jnp.full(1, jnp.inf), jnp.zeros(constrmatrx.shape[0]-2*self.ntyp-3))
+            (jnp.ones(1+self.ntyp), jnp.full(self.ntyp, jnp.inf))
         )
         print(constrmatrx, lb, ub)
         _results = sciop.minimize(
