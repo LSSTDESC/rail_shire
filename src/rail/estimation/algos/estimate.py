@@ -495,7 +495,7 @@ class ShireEstimator(CatEstimator):
     @partial(jit, static_argnums=0)
     def _val_frac_prior(self, oimag, nuvk, nt):
         fo, kt = self.prior_fo(nuvk), self.prior_kt(nuvk)
-        val_prior = frac_func((fo, kt), self.modeldict["mo"], oimag)/nt
+        val_prior = frac_func((fo/nt, kt), self.modeldict["mo"], oimag)
         return val_prior
 
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None, None))
