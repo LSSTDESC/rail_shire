@@ -401,6 +401,30 @@ class ShireInformer(CatInformer):
         lik = vmap_dndz_gals((mags, zs), *pars)
         nllik = jnp.nansum(jnp.where(lik>0, -jnp.log(lik), 0))
         return nllik
+    
+    
+    def _fit_prior(self):
+        fo_init = jnp.full(self.ntyp, 1/self.ntyp)
+        kt_init = jnp.full(self.ntyp, self.config.init_kt)
+        fracparams = jnp.concatenate((fo_init, kt_init))
+        foconstrmatrx = jnp.vstack(
+            (
+                jnp.concatenate((jnp.ones_like(fo_init), jnp.zeros_like(kt_init))),
+                jnp.concatenate(
+                    (
+                        jnp.identity(self.ntyp),
+                        jnp.zeros((self.ntyp, self.ntyp))
+                    ),
+                    axis=1
+                )
+            )
+        )
+        lb = jnp.concatenate(
+            (jnp.ones(1), jnp.zeros(foconstrmatrx.shape[0]-1))
+        )
+        ub = jnp.ones(foconstrmatrx.shape[0])
+        #return None
+
 
     #@partial(jit, static_argnums=0)
     def _find_fractions(self):
@@ -477,7 +501,6 @@ class ShireInformer(CatInformer):
             print(f"minimizing for type {i}")
             typmask = jnp.array([b == i for b in self.besttypes])
             _m = self.refmags[typmask]
-            #marr = jnp.where(_m<self.m0[i], self.m0[i], _m)
             zarr = self.szs[typmask]
             dndzparams = jnp.array([self.config.init_z0, self.config.init_alpha, self.config.init_km, self.config.init_m0])
             Aconstraint = jnp.array(
@@ -493,7 +516,7 @@ class ShireInformer(CatInformer):
             zoi, alfi, kmi, moi = sciop.minimize(
                 lambda P: self._dn_dz_likelihood(P, _m, zarr),
                 dndzparams,
-                method="COBYQA",
+                method="Nelder-Mead", #"COBYQA",
                 # constraints=(
                 #     sciop.LinearConstraint(
                 #         Aconstraint,
