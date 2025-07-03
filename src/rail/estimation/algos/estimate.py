@@ -490,7 +490,7 @@ class ShireEstimator(CatEstimator):
     @partial(jit, static_argnums=0)
     def _val_frac_prior(self, oimag, nuvk, nt):
         fo, kt = self.prior_fo(nuvk), self.prior_kt(nuvk)
-        val_prior = frac_func((fo/nt, kt), self.modeldict["mo"], oimag)
+        val_prior = frac_func((fo, kt), self.modeldict["mo"], oimag)/nt
         return val_prior
 
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None, None))
@@ -508,9 +508,10 @@ class ShireEstimator(CatEstimator):
 
     @partial(jit, static_argnums=0)
     def _prior(self, oimags, redz, nuvk, nt):
-        vals = self.vmap_prior_z(oimags, redz, nuvk, nt)
-        norm = trapezoid(vals, x=redz, axis=0)
-        return vals/norm
+        corrmags = jnp.where(oimags<self.modeldict['mo'], self.modeldict['mo'], oimags)
+        vals = self.vmap_prior_z(corrmags, redz, nuvk, nt)
+        #norm = trapezoid(vals, x=redz, axis=0)
+        return vals #/norm
 
 
     def _estimate_pdf(self, templ_tuples, observed_colors, observed_noise, observed_imags):
