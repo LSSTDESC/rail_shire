@@ -419,7 +419,7 @@ class ShireInformer(CatInformer):
                 jnp.hstack(
                     (jnp.ones_like(fo_init), jnp.zeros_like(kt_init))
                 ),
-                jnp.zeros((fracparams.shape[0]-1, fracparams.shape[0]-1))
+                jnp.zeros((fracparams.shape[0]-1, fracparams.shape[0]))
             )
         )
         
