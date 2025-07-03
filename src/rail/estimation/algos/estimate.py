@@ -174,6 +174,7 @@ class ShireEstimator(CatEstimator):
             self.modeldict["zo_arr"][0],
             self.modeldict["a_arr"][0],
             self.modeldict["km_arr"][0],
+            self.modeldict["mo"][0],
             (4.25, jnp.inf)
         )
         self.sbcd_pars = PriorParams(
@@ -184,6 +185,7 @@ class ShireEstimator(CatEstimator):
             self.modeldict["zo_arr"][1],
             self.modeldict["a_arr"][1],
             self.modeldict["km_arr"][1],
+            self.modeldict["mo"][1],
             (1.9, 4.25)
         )
         # self.sbc_pars = PriorParams(
@@ -214,6 +216,7 @@ class ShireEstimator(CatEstimator):
             self.modeldict["zo_arr"][2],
             self.modeldict["a_arr"][2],
             self.modeldict["km_arr"][2],
+            self.modeldict["mo"][2],
             (-jnp.inf, 1.9)
         )
 
@@ -400,6 +403,23 @@ class ShireEstimator(CatEstimator):
 
 
     @partial(jit, static_argnums=0)
+    def prior_m0(self, nuvk):
+        """prior_m0 Determines the m0 value of the prior function
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: m0
+        :rtype: float
+        """
+        val = (
+            self.irr_pars.m0
+            + (self.sbcd_pars.m0 - self.irr_pars.m0) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.m0 - self.sbcd_pars.m0) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val
+
+
+    @partial(jit, static_argnums=0)
     def prior_alpha(self, nuvk):
         """prior_alpha Determines the alpha0 value in the prior function (power law)
 
@@ -485,8 +505,8 @@ class ShireEstimator(CatEstimator):
 
     @partial(jit, static_argnums=0)
     def _val_nz_prior(self, oimag, z, nuvk):
-        alpha, z0, km = self.prior_alpha(nuvk), self.prior_z0(nuvk), self.prior_km(nuvk)
-        val_prior = nz_func((oimag, z), z0, alpha, km, self.modeldict["mo"] )
+        alpha, z0, km, m0 = self.prior_alpha(nuvk), self.prior_z0(nuvk), self.prior_km(nuvk), self.prior_m0(nuvk)
+        val_prior = nz_func( (oimag, z), z0, alpha, km, m0 )
         return val_prior
 
     vmap_nz_gals = vmap(_val_nz_prior, in_axes=(None, 0, None, None))
@@ -494,8 +514,8 @@ class ShireEstimator(CatEstimator):
 
     @partial(jit, static_argnums=0)
     def _val_frac_prior(self, oimag, nuvk, nt):
-        fo, kt = self.prior_fo(nuvk), self.prior_kt(nuvk)
-        val_prior = frac_func((fo/nt, kt), self.modeldict["mo"], oimag)
+        fo, kt, m0 = self.prior_fo(nuvk), self.prior_kt(nuvk), self.prior_m0(nuvk)
+        val_prior = frac_func((fo/nt, kt), m0, oimag)
         return val_prior
 
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None, None))
@@ -513,10 +533,10 @@ class ShireEstimator(CatEstimator):
 
     @partial(jit, static_argnums=0)
     def _prior(self, oimags, redz, nuvk, nt):
-        corrmags = jnp.where(oimags<self.modeldict['mo'], self.modeldict['mo'], oimags)
-        vals = self.vmap_prior_z(corrmags, redz, nuvk, nt)
-        #norm = trapezoid(vals, x=redz, axis=0)
-        return vals #/norm
+        #corrmags = jnp.where(oimags<self.modeldict['mo'], self.modeldict['mo'], oimags)
+        vals = self.vmap_prior_z(oimags, redz, nuvk, nt)
+        norm = trapezoid(vals, x=redz, axis=0)
+        return vals/norm
 
 
     def _estimate_pdf(self, templ_tuples, observed_colors, observed_noise, observed_imags):
