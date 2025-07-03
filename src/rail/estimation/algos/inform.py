@@ -421,7 +421,7 @@ class ShireInformer(CatInformer):
         
         foconstrmatrx = jnp.vstack(
             (
-                jnp.concatenate(jnp.ones_like(fo_init), jnp.zeros_like(kt_init)),
+                jnp.concatenate((jnp.ones_like(fo_init), jnp.zeros_like(kt_init))),
                 jnp.concatenate(
                     (
                         jnp.identity(self.ntyp),
