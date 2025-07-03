@@ -7,7 +7,7 @@ from jax import numpy as jnp
 from jax import jit, vmap
 from jax.tree_util import tree_map
 from jax.scipy.special import gamma as jgamma
-#from jax.scipy.optimize import minimize as jmini
+from jax.scipy.optimize import minimize as jmini
 import scipy.optimize as sciop
 #from jax import random as jrn
 
@@ -62,7 +62,7 @@ def nz_func(mz, z0, alpha, km, m0):  # pragma: no cover
     m, z = mz
     zm = z0 + (km * (m - m0))
     vals = jnp.power(z, alpha) * jnp.exp(- jnp.power((z / zm), alpha))
-    Inorm = jnp.power(zm, (alpha + 1)) * jgamma(1 + 1 / alpha) / alpha
+    Inorm = jnp.power(zm, alpha) * jgamma(1 + 1 / alpha) / alpha
     return vals / Inorm
 
 vmap_dndz_gals = vmap(
@@ -83,7 +83,7 @@ def frac_func(X, m0, m):
     fo, kt = X
     return fo * jnp.exp(-kt * (m - m0))
 
-vmap_frac = vmap(
+_vmap_frac = vmap(
     vmap(
         frac_func,
         in_axes=(None, None, 0)
@@ -91,6 +91,10 @@ vmap_frac = vmap(
     in_axes=(0, None, None)
 )
 
+def vmap_frac(X, m0, m):
+    _vals = _vmap_frac(X, m0, m)
+    _sum = jnp.nansum(_vals, axis=0)
+    return _vals/_sum
 
 class ShireInformer(CatInformer):
     name = "ShireInformer"
@@ -379,14 +383,11 @@ class ShireInformer(CatInformer):
 
 
     @partial(jit, static_argnums=0) #, 2, 3))
-    def _frac_likelihood(self, frac_params): #, btyp, idxbtyp):
+    def _frac_likelihood(self, frac_params, mags): #, btyp, idxbtyp):
         _foi = frac_params[:self.ntyp]
         _kti = frac_params[self.ntyp:]
         X = (_foi, _kti) #jnp.vstack((_foi, _kti)).T
-        mags = jnp.where(self.refmags<self.m0, self.m0, self.refmags)
         probs = vmap_frac(X, self.m0, mags)
-        norms = jnp.sum(probs, axis=0)
-        probs = probs / norms
         probsel = probs[self.besttypes, jnp.arange(len(self.besttypes))]
         likelihood = jnp.where(probsel>0, -jnp.log(probsel), 0)
         return jnp.nansum(likelihood)
@@ -413,12 +414,24 @@ class ShireInformer(CatInformer):
             method="BFGS"
         ).x
         '''
+        Aconstr = jnp.hstack((jnp.ones_like(fo_init), jnp.zeros_like(kt_init)))
+        
+        minmags = jnp.where(self.refmags<self.m0, self.m0, self.refmags)
+        def funconstr(X):
+            fo, kt = X[:self.ntyp], X[self.ntyp:]
+            vals = _vmap_frac((fo, kt), self.m0, minmags)
+            return jnp.nansum(vals, axis=0)
+        
         frac_results = sciop.minimize(
-            self._frac_likelihood, fracparams,
-            method="Nelder-Mead",
+            lambda P: self._frac_likelihood(P, minmags), fracparams,
+            method="trust-constr",
             bounds=[
                 (0, 1), (0, 1), (0, 1), (0, 1),
                 (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
+            ],
+            constraints=[
+                sciop.LinearConstraint(Aconstr, 1.0, 1.0),
+                sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags)),
             ]
         ).x
         tmpfo = frac_results[:self.ntyp]
@@ -442,11 +455,11 @@ class ShireInformer(CatInformer):
             marr = jnp.where(_m<self.m0, self.m0, _m)
             zarr = self.szs[typmask]
             dndzparams = jnp.array([self.config.init_z0, self.config.init_alpha, self.config.init_km])
-            zoi, alfi, kmi = sciop.minimize(
+            zoi, alfi, kmi = jmini(
                 lambda P: self._dn_dz_likelihood(P, marr, zarr),
                 dndzparams,
-                method="Nelder-Mead",
-                bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf)]
+                method="BFGS",
+                #bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf)]
             ).x
             zo_arr.append(zoi)
             a_arr.append(alfi)
