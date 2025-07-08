@@ -1,7 +1,9 @@
 import os
 import jax
+from functools import partial
 from jax import numpy as jnp
 from jax.tree_util import tree_map
+from jax import jit, vmap
 import qp
 #import pandas as pd
 from ceci.config import StageParameter as Param
@@ -10,10 +12,11 @@ from rail.core.common_params import SHARED_PARAMS
 from rail.core.data import TableHandle, ModelHandle
 
 from .analysis import _DUMMY_PARS, PARS_DF, vmap_mean, vmap_median
-from .galaxy import vmap_mags_to_i_and_colors, posterior, likelihood
+from .galaxy import vmap_mags_to_i_and_colors, likelihood
 from .filter import get_sedpy
 from .template import make_legacy_templates, make_sps_templates, istuple
 from .io_utils import load_ssp, SHIREDATALOC
+from .inform import PriorParams, nz_func, frac_func
 
 try:
     from jax.numpy import trapezoid
@@ -130,6 +133,11 @@ class ShireEstimator(CatEstimator):
         self.zgrid=None
         self.avgrid=None
         self.templates=None
+        self.e0_pars = None
+        self.sbcd_pars = None
+        # self.sbc_pars = None
+        # self.scd_pars = None
+        self.irr_pars = None
 
     def _initialize_run(self):
         super()._initialize_run()
@@ -158,6 +166,59 @@ class ShireEstimator(CatEstimator):
     def open_model(self, **kwargs):
         CatEstimator.open_model(self, **kwargs)
         self.modeldict = self.model
+        self.e0_pars = PriorParams(
+            0,
+            "E_S0",
+            self.modeldict["fo_arr"][0],
+            self.modeldict["kt_arr"][0],
+            self.modeldict["zo_arr"][0],
+            self.modeldict["a_arr"][0],
+            self.modeldict["km_arr"][0],
+            self.modeldict["mo"][0],
+            (4.25, jnp.inf)
+        )
+        self.sbcd_pars = PriorParams(
+            1,
+            "Sbc",
+            self.modeldict["fo_arr"][1],
+            self.modeldict["kt_arr"][1],
+            self.modeldict["zo_arr"][1],
+            self.modeldict["a_arr"][1],
+            self.modeldict["km_arr"][1],
+            self.modeldict["mo"][1],
+            (1.9, 4.25)
+        )
+        # self.sbc_pars = PriorParams(
+        #     1,
+        #     "Sbc",
+        #     self.modeldict["fo_arr"][1],
+        #     self.modeldict["kt_arr"][1],
+        #     self.modeldict["zo_arr"][1],
+        #     self.modeldict["a_arr"][1],
+        #     self.modeldict["km_arr"][1],
+        #     (3.19, 4.25)
+        # )
+        # self.scd_pars = PriorParams(
+        #     2,
+        #     "Scd",
+        #     self.modeldict["fo_arr"][2],
+        #     self.modeldict["kt_arr"][2],
+        #     self.modeldict["zo_arr"][2],
+        #     self.modeldict["a_arr"][2],
+        #     self.modeldict["km_arr"][2],
+        #     (1.9, 3.19)
+        # )
+        self.irr_pars = PriorParams(
+            2,
+            "Irr",
+            self.modeldict["fo_arr"][2],
+            self.modeldict["kt_arr"][2],
+            self.modeldict["zo_arr"][2],
+            self.modeldict["a_arr"][2],
+            self.modeldict["km_arr"][2],
+            self.modeldict["mo"][2],
+            (-jnp.inf, 1.9)
+        )
 
 
     def open_templates(self, **kwargs):
@@ -324,6 +385,159 @@ class ShireEstimator(CatEstimator):
         )
         return ab_colors, ab_cols_errs, i_mag_ab
 
+    @partial(jit, static_argnums=0)
+    def prior_z0(self, nuvk):
+        """prior_z0 Determines the z0 value of the prior function
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: z0
+        :rtype: float
+        """
+        val = (
+            self.irr_pars.z0
+            + (self.sbcd_pars.z0 - self.irr_pars.z0) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.z0 - self.sbcd_pars.z0) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val
+
+
+    @partial(jit, static_argnums=0)
+    def prior_m0(self, nuvk):
+        """prior_m0 Determines the m0 value of the prior function
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: m0
+        :rtype: float
+        """
+        val = (
+            self.irr_pars.m0
+            + (self.sbcd_pars.m0 - self.irr_pars.m0) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.m0 - self.sbcd_pars.m0) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val
+
+
+    @partial(jit, static_argnums=0)
+    def prior_alpha(self, nuvk):
+        """prior_alpha Determines the alpha0 value in the prior function (power law)
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: alpha0
+        :rtype: float
+        """
+        val = (
+            self.irr_pars.alpha
+            + (self.sbcd_pars.alpha - self.irr_pars.alpha) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.alpha - self.sbcd_pars.alpha) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val
+
+
+    @partial(jit, static_argnums=0)
+    def prior_km(self, nuvk):
+        """prior_km Determines the k value in the prior function
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: k
+        :rtype: float
+        """
+        val = (
+            self.irr_pars.km
+            + (self.sbcd_pars.km - self.irr_pars.km) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.km - self.sbcd_pars.km) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val
+
+
+    @partial(jit, static_argnums=0)
+    def prior_fo(self, nuvk):
+        """prior_fo Determines the f0 value in the prior (fractions) function
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: fo
+        :rtype: float
+        """
+        val = (
+            self.irr_pars.fo
+            + (self.sbcd_pars.fo - self.irr_pars.fo) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.fo - self.sbcd_pars.fo) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val
+
+
+    @partial(jit, static_argnums=0)
+    def prior_kt(self, nuvk):
+        """prior_kt Determines the kt value in the prior (fractions) function
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: kt
+        :rtype: float
+        """
+        val = (
+            self.irr_pars.kt
+            + (self.sbcd_pars.kt - self.irr_pars.kt) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.kt - self.sbcd_pars.kt) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val
+
+
+    @partial(jit, static_argnums=0)
+    def prior_mod(self, nuvk):
+        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: Model Id
+        :rtype: int
+        """
+        val = (
+            self.irr_pars.mod
+            + (self.sbcd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.mod - self.sbcd_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val.astype(int)
+
+    @partial(jit, static_argnums=0)
+    def _val_nz_prior(self, oimag, z, nuvk):
+        alpha, z0, km, m0 = self.prior_alpha(nuvk), self.prior_z0(nuvk), self.prior_km(nuvk), self.prior_m0(nuvk)
+        val_prior = nz_func( (oimag, z), z0, alpha, km, m0 )
+        return val_prior
+
+    vmap_nz_gals = vmap(_val_nz_prior, in_axes=(None, 0, None, None))
+    vmap_nz_z = vmap(vmap_nz_gals, in_axes=(None, None, 0, None))
+
+    @partial(jit, static_argnums=0)
+    def _val_frac_prior(self, oimag, nuvk, nt):
+        fo, kt, m0 = self.prior_fo(nuvk), self.prior_kt(nuvk), self.prior_m0(nuvk)
+        val_prior = frac_func((fo/nt, kt), m0, oimag)
+        return val_prior
+
+    vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None, None))
+
+
+    @partial(jit, static_argnums=0)
+    def _val_prior(self, oimag, z, nuvk, nt):
+        nzval = self._val_nz_prior(oimag, z, nuvk)
+        fracval = self._val_frac_prior(oimag, nuvk, nt)
+        return nzval*fracval
+
+
+    vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None, None))
+    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, None, None))
+
+    @partial(jit, static_argnums=0)
+    def _prior(self, oimags, redz, nuvk, nt):
+        #corrmags = jnp.where(oimags<self.modeldict['mo'], self.modeldict['mo'], oimags)
+        vals = self.vmap_prior_z(oimags, redz, nuvk, nt)
+        norm = trapezoid(vals, x=redz, axis=0)
+        return vals/norm
+
 
     def _estimate_pdf(self, templ_tuples, observed_colors, observed_noise, observed_imags):
 
@@ -334,8 +548,12 @@ class ShireEstimator(CatEstimator):
                 is_leaf=istuple,
             )
         else:
+            def _posterior(sedcols, ocols, onoise, oimags, redz, nuvks):
+                nt = self.prior_mod(nuvks[0][0])
+                return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks[0][0], nt) # prior is computed for the template without dust
+            
             probz_arr = tree_map(
-                lambda sed_tupl: posterior(sed_tupl[0], observed_colors, observed_noise, observed_imags, self.zgrid, sed_tupl[1]),
+                lambda sed_tupl: _posterior(sed_tupl[0], observed_colors, observed_noise, observed_imags, self.zgrid, sed_tupl[1]),
                 templ_tuples,
                 is_leaf=istuple,
             )

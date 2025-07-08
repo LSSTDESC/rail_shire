@@ -171,7 +171,7 @@ vmap_nz_prior = vmap(
         vmap(z_prior_val, in_axes=(0, None, None)),  # vmap version to compute the prior value for all observations
         in_axes=(None, None, 0),  # and a certain SED template at all dust attenuations
     ),
-    in_axes=(None, 0, 0),  # and at all redshifts
+    in_axes=(None, 0, None),  # and at all redshifts
 )
 
 

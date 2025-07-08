@@ -1,9 +1,14 @@
 import os
 import jax
 import numpy as np
+from collections import namedtuple
+from functools import partial
 from jax import numpy as jnp
-from jax import vmap
+from jax import jit, vmap
 from jax.tree_util import tree_map
+from jax.scipy.special import gamma as jgamma
+#from jax.scipy.optimize import minimize as jmini
+import scipy.optimize as sciop
 #from jax import random as jrn
 
 import pandas as pd
@@ -11,7 +16,6 @@ import pandas as pd
 from tqdm import tqdm
 import tables_io
 from sklearn.ensemble import RandomForestClassifier
-import scipy.optimize as sciop
 from ceci.config import StageParameter as Param
 from rail.estimation.estimator import CatInformer
 #from rail.utils.path_utils import RAILDIR
@@ -46,14 +50,54 @@ from .template import (
     vmap_calc_eqw
 )
 from .filter import get_sedpy
-from .cosmology import prior_mod
+#from .cosmology import prior_mod
 
 jax.config.update("jax_enable_x64", True)
 
-def nzfunc(X, m0, m, z):  # pragma: no cover
-    z0, alpha, km = X
+PriorParams = namedtuple("PriorParams", ["mod", "type", "fo", "kt", "z0", "alpha", "km", "m0", "nuv_range"])
+
+@jit
+def nz_func(mz, z0, alpha, km, m0):  # pragma: no cover
+    #z0, alpha, km = X
+    mm, z = mz
+    m = jnp.where(mm<m0, m0, mm)
     zm = z0 + (km * (m - m0))
-    return np.power(z, alpha) * np.exp(-1. * np.power((z / zm), alpha))
+    vals = jnp.power(z, alpha) * jnp.exp(- jnp.power((z / zm), alpha))
+    Inorm = jnp.power(zm, alpha+1) * jgamma(1 + 1 / alpha) / alpha
+    return vals / Inorm
+
+vmap_dndz_gals = vmap(
+    nz_func,
+    in_axes=(0, None, None, None, None)
+)
+
+vmap_dndz = vmap(
+    vmap(
+        nz_func,
+        in_axes=(0, None, None, None, None)
+    ),
+    in_axes=(None, 0, 0, 0, 0)
+)
+
+
+@jit
+def frac_func(X, m0, m):
+    fo, kt = X
+    mm = jnp.where(m<m0, m0, m)
+    return fo * jnp.exp(-kt * (mm - m0))
+
+_vmap_frac = vmap(
+    vmap(
+        frac_func,
+        in_axes=(None, None, 0)
+    ),
+    in_axes=(0, 0, None)
+)
+
+def vmap_frac(X, m0, m):
+    _vals = _vmap_frac(X, m0, m)
+    _sum = jnp.nansum(_vals, axis=0)
+    return _vals/_sum
 
 class ShireInformer(CatInformer):
     name = "ShireInformer"
@@ -126,9 +170,11 @@ class ShireInformer(CatInformer):
                 'If `randomsel` is `True`, this specifies the number of randomly selected galaxies to be used as templates.'
         ),
         init_kt=Param(float, 0.3, msg="initial guess for kt in training"),
-        init_zo=Param(float, 0.4, msg="initial guess for z0 in training"),
+        init_z0=Param(float, 0.4, msg="initial guess for z0 in training"),
+        init_m0=Param(float, 20, msg="initial guess for m0 in training"),
         init_alpha=Param(float, 1.8, msg="initial guess for alpha in training"),
         init_km=Param(float, 0.1, msg="initial guess for km in training"),
+        refcategs=Param(list, ["E_S0", "Sbc/Scd", "Irr"], msg="Galaxy types for prior functions.")
     )
 
     def __init__(self, args, **kwargs):
@@ -143,18 +189,42 @@ class ShireInformer(CatInformer):
         if not os.path.exists(self.data_path):  # pragma: no cover
             raise FileNotFoundError("SHIREDATALOC " + self.data_path + " does not exist! Check value of data_path in config file!")
         
+        self.m0 = None
         self.fo_arr = None
         self.kt_arr = None
         self.typmask = None
-        self.ntyp = None
         self.mags = None
+        self.refmags = None
         self.szs = None
         self.pzs = None
+        self.refcategs = np.array(self.config.refcategs)
+        self.ntyp = len(self.refcategs)
+        self.nt_array = None
         self.besttypes = None
-        self.m0 = self.config.m0
         self.templates_df = None
         self.filters_names = None
         self.color_names = None
+        self.e0_pars = PriorParams(0, self.refcategs[0], None, None, None, None, None, None, (4.25, jnp.inf))
+        self.sbcd_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, (1.9, 4.25))
+        #self.sbc_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, (3.1.9, 4.25))
+        #self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, (1.9, 3.19))
+        self.irr_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, (-jnp.inf, 1.9))
+
+    @partial(jit, static_argnums=0)
+    def prior_mod(self, nuvk):
+        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: Model Id
+        :rtype: int
+        """
+        val = (
+            self.irr_pars.mod
+            + (self.sbcd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
+            + (self.e0_pars.mod - self.sbcd_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val.astype(int)
 
 
     def open_templates(self, **kwargs):
@@ -200,6 +270,9 @@ class ShireInformer(CatInformer):
 
         self.mags = jnp.column_stack(
             [training_data[f"mag_{_n}"] for _n in self.filters_names]
+        )
+        self.refmags = jnp.array(
+            training_data[self.config.ref_band]
         )
 
         self.szs = jnp.array(
@@ -303,6 +376,7 @@ class ShireInformer(CatInformer):
             _df['z_p'] = pzs
             _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
             _df['name'] = np.full(pzs.shape, tname)
+            _df[self.config.redshift_col] = np.full(pzs.shape, row[self.config.redshift_col])
             templs_as_dict.update({f"{tname}": _df})
         all_templs_df = pd.concat(
             [_df for _, _df in templs_as_dict.items()],
@@ -312,84 +386,262 @@ class ShireInformer(CatInformer):
         return all_templs_df
 
 
-    def _frac_likelihood(self, frac_params):
-        ngal = len(self.mags)
-        probs = np.zeros([self.ntyp, ngal])
-        foarr = frac_params[:self.ntyp - 1]
-        ktarr = frac_params[self.ntyp - 1:]
-        for i in range(self.ntyp - 1):
-            probs[i, :] = [foarr[i] * np.exp(-1. * ktarr[i] * (mag - self.m0)) for mag in self.mags]
-        # set the probability of last element to 1 - sum of the others to
-        # keep normalized, this is the way BPZ does things
-        probs[self.ntyp - 1, :] = 1. - np.sum(probs[:-1, :], axis=0)
-        likelihood = 0.0
-        for i, typ in enumerate(self.besttypes):
-            if probs[typ, i] > 0.0:
-                likelihood += -2. * np.log10(probs[typ, i])
-        return likelihood
+    @partial(jit, static_argnums=0) #, 2, 3))
+    def _frac_likelihood(self, frac_params, mags): #, btyp, idxbtyp):
+        _foi = frac_params[:self.ntyp]
+        _kti = frac_params[self.ntyp:]
+        X = (_foi, _kti) #jnp.vstack((_foi, _kti)).T
+        probs = vmap_frac(X, self.m0, mags)
+        probsel = probs[self.besttypes, jnp.arange(len(self.besttypes))]
+        likelihood = jnp.where(probsel>0, -jnp.log(probsel), 0)
+        return jnp.nansum(likelihood)
 
+
+    @partial(jit, static_argnums=0) #, 2, 3))
+    def _frac_likelihood_combined(self, frac_params, mags): #, btyp, idxbtyp):
+        _foi = frac_params[:self.ntyp]
+        _kti = frac_params[self.ntyp:2*self.ntyp]
+        _moi = frac_params[2*self.ntyp:]
+        X = (_foi, _kti) #jnp.vstack((_foi, _kti)).T
+        probs = vmap_frac(X, _moi, mags)
+        probsel = probs[self.besttypes, jnp.arange(len(self.besttypes))]
+        likelihood = jnp.where(probsel>0, -jnp.log(probsel), 0)
+        return jnp.nansum(likelihood)
+
+
+    @partial(jit, static_argnums=0)
+    def _dn_dz_likelihood(self, pars, mags, zs):
+        lik = vmap_dndz_gals((mags, zs), *pars)
+        nllik = jnp.nansum(jnp.where(lik>0, -jnp.log(lik), 0))
+        return nllik
+
+
+    @partial(jit, static_argnums=0)
+    def _dn_dz_likelihood_combined(self, pars, mags, zs):
+        _moi, _zoi, _alphai, _kmi = pars[:self.ntyp], pars[self.ntyp:2*self.ntyp], pars[2*self.ntyp:3*self.ntyp], pars[3*self.ntyp:]
+        lik = vmap_dndz((mags, zs), _zoi, _alphai, _kmi, _moi)
+        liksel = lik[self.besttypes, jnp.arange(len(self.besttypes))]
+        nllik = jnp.nansum(jnp.where(liksel>0, -jnp.log(lik), 0))
+        return nllik
+
+    @partial(jit, static_argnums=0)
+    def _combined_nllik(self, pars, mags, zs):
+        fracpars = pars[:3*self.ntyp]
+        dnzpars = pars[2*self.ntyp:] # overlap for m0
+        return self._frac_likelihood_combined(fracpars, mags)+self._dn_dz_likelihood_combined(dnzpars, mags, zs)
+
+
+    def _fit_prior(self):
+        print("Fitting prior...")
+        fo_init = jnp.full(self.ntyp, 1/self.ntyp)
+        kt_init = jnp.full(self.ntyp, self.config.init_kt)
+        m0_init = jnp.full(self.ntyp, self.config.init_m0)
+        z0_init = jnp.full(self.ntyp, self.config.init_z0)
+        al_init = jnp.full(self.ntyp, self.config.init_alpha)
+        km_init = jnp.full(self.ntyp, self.config.init_km)
+        
+        initparams = jnp.concatenate(
+            (fo_init, kt_init, m0_init, z0_init, al_init, km_init)
+        )
+
+        #def funconstr(X):
+        #    fo, kt, m0 = X[:self.ntyp], X[self.ntyp:2*self.ntyp], X[2*self.ntyp:3*self.ntyp]
+        #    vals = _vmap_frac((fo, kt), m0, self.refmags)
+        #    return jnp.nansum(vals, axis=0)
+
+        constrmatrx = jnp.vstack(
+            (
+                jnp.concatenate(
+                    (jnp.ones(self.ntyp), jnp.zeros(initparams.shape[0]-self.ntyp))
+                ),
+                jnp.concatenate(
+                    (
+                        jnp.identity(self.ntyp),
+                        jnp.zeros((self.ntyp, initparams.shape[0]-self.ntyp))
+                    ),
+                    axis=1
+                ),
+                jnp.concatenate(
+                    (
+                        jnp.zeros((self.ntyp, 3*self.ntyp)),
+                        jnp.identity(self.ntyp),
+                        jnp.zeros((self.ntyp, initparams.shape[0]-4*self.ntyp))
+                    ),
+                    axis=1
+                )
+            )
+        )
+        lb = jnp.concatenate(
+            (jnp.ones(1), jnp.zeros(constrmatrx.shape[0]-1))
+        )
+        ub = jnp.concatenate(
+            (jnp.ones(1+self.ntyp), jnp.full(self.ntyp, jnp.inf))
+        )
+        print(f"Constraints matrices: {constrmatrx, lb, ub}")
+        _results = sciop.minimize(
+            lambda P: self._combined_nllik(P, self.refmags, self.szs), initparams,
+            method="COBYQA",# "Nelder-Mead", #
+            #bounds=[
+            #    (0, 1), (0, 1), (0, 1), (0, 1),
+            #    (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
+            #],
+            constraints=[
+                sciop.LinearConstraint(
+                    constrmatrx,
+                    lb,
+                    ub
+                ),
+            #    sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags))
+            ]
+        ).x
+        tmpfo = _results[:self.ntyp]
+        # minimizer can sometimes give fractions greater than one, if so normalize
+        fracnorm = jnp.sum(tmpfo)
+        self.fo_arr = tmpfo/fracnorm
+        self.kt_arr = _results[self.ntyp:2*self.ntyp]
+        self.m0 = _results[2*self.ntyp:3*self.ntyp]
+        zo_arr = _results[3*self.ntyp:4*self.ntyp]
+        alpha_arr = _results[4*self.ntyp:-self.ntyp]
+        km_arr = _results[-self.ntyp:]
+        
+        for i, (ifo, ikt, imo, izo, ial, ikm) in enumerate(zip(
+            self.fo_arr, self.kt_arr, self.m0, zo_arr, alpha_arr, km_arr )):
+            print(f"best fit f0, kt, m0, z0, alpha, km for type {i}: {ifo, ikt, imo, izo, ial, ikm}")
+        
+        return zo_arr, alpha_arr, km_arr
+        #return None
+
+
+    #@partial(jit, static_argnums=0)
     def _find_fractions(self):
         # set up fo and kt arrays, choose default start values
-        if self.ntyp == 1:
-            fo_init = np.array([1.0])
-            kt_init = np.array([self.config.init_kt])
-        else:
-            fo_init = np.ones(self.ntyp - 1) / (self.ntyp)
-            kt_init = np.ones(self.ntyp - 1) * self.config.init_kt
-        fracparams = np.hstack([fo_init, kt_init])
+        fo_init = jnp.full(self.ntyp, 1/self.ntyp)
+        kt_init = jnp.full(self.ntyp, self.config.init_kt)
+        fracparams = jnp.concatenate((fo_init, kt_init))
+        print("Finding fractions...")
         # run scipy optimize to find best params
         # note that best fit vals are stored as "x" for some reason
-        frac_results = sciop.minimize(self._frac_likelihood, fracparams, method="nelder-mead").x
-        if self.ntyp == 1:
-            self.fo_arr = np.array([frac_results[0]])
-            self.kt_arr = np.array([frac_results[1]])
-        else:
-            tmpfo = frac_results[:self.ntyp - 1]
-            # minimizer can sometimes give fractions greater than one, if so normalize
-            fracnorm = np.sum(tmpfo)
-            if fracnorm > 1.:  # pragma: no cover
-                print("bad norm for f0, normalizing")
-                tmpfo /= fracnorm
-            self.fo_arr = tmpfo
-            self.kt_arr = frac_results[self.ntyp - 1:]
+        '''
+        frac_results = jmini(
+            self._frac_likelihood, fracparams,
+            method="BFGS"
+        ).x
+        '''
+
+        foconstrmatrx = jnp.vstack(
+            (
+                jnp.concatenate((jnp.ones_like(fo_init), jnp.zeros_like(kt_init))),
+                jnp.concatenate(
+                    (
+                        jnp.identity(self.ntyp),
+                        jnp.zeros((self.ntyp, self.ntyp))
+                    ),
+                    axis=1
+                )
+            )
+        )
+
+        lb = jnp.concatenate(
+            (jnp.ones(1), jnp.zeros(foconstrmatrx.shape[0]-1))
+        )
+        ub = jnp.ones(foconstrmatrx.shape[0])
+        
+        #minmags = jnp.where(self.refmags<self.m0, self.m0, self.refmags)
+        #def funconstr(X):
+        #    fo, kt = X[:self.ntyp], X[self.ntyp:]
+        #    vals = _vmap_frac((fo, kt), self.m0, self.refmags)
+        #    return jnp.nansum(vals, axis=0)
+        
+        frac_results = sciop.minimize(
+            lambda P: self._frac_likelihood(P, self.refmags), fracparams,
+            method="COBYQA",# "Nelder-Mead", #
+            #bounds=[
+            #    (0, 1), (0, 1), (0, 1), (0, 1),
+            #    (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)
+            #],
+            constraints=[
+                sciop.LinearConstraint(
+                    foconstrmatrx,
+                    lb,
+                    ub
+                ),
+            #    sciop.NonlinearConstraint(funconstr, jnp.ones_like(self.refmags), jnp.ones_like(self.refmags))
+            ]
+        ).x
+        tmpfo = frac_results[:self.ntyp]
+        # minimizer can sometimes give fractions greater than one, if so normalize
+        fracnorm = jnp.sum(tmpfo)
+        self.fo_arr = tmpfo/fracnorm
+        self.kt_arr = frac_results[self.ntyp:]
+
+
+    #@partial(jit, static_argnums=0)
+    def _find_dndz_params(self):
+        # initial parameters for zo, alpha, and km
+        mo_arr = []
+        zo_arr = []
+        a_arr = []
+        km_arr = []
+        print("Fitting prior parameters...")
+        for i in range(self.ntyp):
+            print(f"minimizing for type {i}")
+            typmask = jnp.array([b == i for b in self.besttypes])
+            _m = self.refmags[typmask]
+            zarr = self.szs[typmask]
+            dndzparams = jnp.array([self.config.init_m0, self.config.init_z0, self.config.init_alpha, self.config.init_km])
+            Aconstraint = jnp.array(
+                [
+                    [0, 0, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 0, 0, 0],
+                    [0, 0, 0, 0]
+                ]
+            )
+            lb = jnp.array([0, 0, 0, 0])
+            ub = jnp.array([0, jnp.inf, 0, 0])
+            moi, zoi, alfi, kmi = sciop.minimize(
+                lambda P: self._dn_dz_likelihood(P, _m, zarr),
+                dndzparams,
+                method="COBYQA", #"Nelder-Mead", #
+                constraints=(
+                    sciop.LinearConstraint(
+                        Aconstraint,
+                        lb,
+                        ub
+                    )
+                )
+                #bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)]
+            ).x
+            mo_arr.append(moi)
+            zo_arr.append(zoi)
+            a_arr.append(alfi)
+            km_arr.append(kmi)
+            print(f"best fit m0, z0, alpha, km for type {i}: {moi, zoi, alfi, kmi}")
+        return jnp.array(mo_arr), jnp.array(zo_arr), jnp.array(km_arr), jnp.array(a_arr)
 
 
     def class_nuvk(self, test_df):
-        refcategs = {"E_S0", "Sbc", "Scd", "Irr"}
-        wls, transm = self._load_filters()
+        #self._load_filters()
         all_tsels_df = self._nuvk_classif()
         classifier = RandomForestClassifier() # use defaults settings for now
-        X = np.array(all_tsels_df[self.color_names+[self.config.redshift_col]])
+        X = np.array(all_tsels_df[self.color_names])
         y = np.array(all_tsels_df['CAT_NUVK'])
         classifier.fit(X, y)
 
-        Xtest = np.array(test_df[self.color_names+[self.config.redshift_col]])
+        Xtest = np.array(test_df[self.color_names])
         ytest = classifier.predict(Xtest)
-        yvals, ycounts = np.unique(ytest, return_counts=True)
+        #yvals, ycounts = np.unique(ytest, return_counts=True)
 
         test_df['CAT_NUVK'] = ytest
+        self.besttypes = [np.argwhere(self.refcategs==cat)[0][0] for cat in ytest]
 
-        fracs = jnp.array([ycounts[np.argwhere(yvals==refcat)[0]]/ytest.shape[0] for refcat in refcategs])
-        self.fo_arr = fracs
+        z0list, alflist, kmlist = self._fit_prior()
 
+        #molist, z0list, alflist, kmlist = self._find_dndz_params()
+        #self.m0 = molist
+        #self._find_fractions()
 
-        z0list = []
-        alflist = []
-        kmlist = []
-        m0list = []
-
-        for cat in refcategs:
-            subdf = test_df[test_df['CAT_NUVK']==cat]
-            m_i = np.array(subdf[self.config.ref_band])
-            zs = np.array(subdf[self.config.redshift_col])
-            _nz, _bins = np.histogram(zs, bins=self.pzs, density=True)
-            nz = np.array([_nz[nbin] for nbin in np.digitize(zs, _bins)])
-            z0, alpha, km = sciop.curve_fit(nzfunc, (self.m0, m_i, zs), nz)[0]
-            z0list.append(z0)
-            alflist.append(alpha)
-            kmlist.append(km)
-        return jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist), jnp.array(m0list)
-
+        return z0list, alflist, kmlist #jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist)
 
 
     def run(self):
@@ -398,9 +650,9 @@ class ShireInformer(CatInformer):
 
         train_df = pd.DataFrame(
             data=jnp.column_stack(
-                (self.mags[:, :-1]-self.mags[:, 1:], self.szs)
+                (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
             ),
-            columns=self.color_names+[self.config["redshift_col"]]
+            columns=self.color_names+[self.config.ref_band, self.config.redshift_col]
         )
 
         templs_ref_df = pd.read_hdf(
@@ -545,14 +797,72 @@ class ShireInformer(CatInformer):
         )
 
         self.templates_df = templs_score_df[["name", "num", "score", "Dataset", self.config["redshift_col"]]+_DUMMY_PARS.PARAM_NAMES_FLAT]
+        
+        res_classif = self.class_nuvk(train_df)
+        
         self.model = dict(
             fo_arr=self.fo_arr,
             kt_arr=self.kt_arr,
-            zo_arr=None,
-            km_arr=None,
-            a_arr=None,
+            zo_arr=np.array(res_classif[0]),
+            a_arr=np.array(res_classif[1]),
+            km_arr=np.array(res_classif[2]),
             mo=self.m0,
-            nt_array=None)
+            nt_array=self.nt_array
+        )
+        self.e0_pars = PriorParams(
+            0,
+            self.refcategs[0],
+            self.model["fo_arr"][0],
+            self.model["kt_arr"][0],
+            self.model["zo_arr"][0],
+            self.model["a_arr"][0],
+            self.model["km_arr"][0],
+            self.model["mo"][0],
+            (4.25, jnp.inf)
+        )
+        self.sbcd_pars = PriorParams(
+            1,
+            self.refcategs[1],
+            self.model["fo_arr"][1],
+            self.model["kt_arr"][1],
+            self.model["zo_arr"][1],
+            self.model["a_arr"][1],
+            self.model["km_arr"][1],
+            self.model["mo"][1],
+            (1.9, 4.25)
+        )
+        # self.sbc_pars = PriorParams(
+        #     1,
+        #     self.refcategs[1],
+        #     self.model["fo_arr"][1],
+        #     self.model["kt_arr"][1],
+        #     self.model["zo_arr"][1],
+        #     self.model["a_arr"][1],
+        #     self.model["km_arr"][1],
+        #     (3.19, 4.25)
+        # )
+        # self.scd_pars = PriorParams(
+        #     2,
+        #     self.refcategs[2],
+        #     self.model["fo_arr"][2],
+        #     self.model["kt_arr"][2],
+        #     self.model["zo_arr"][2],
+        #     self.model["a_arr"][2],
+        #     self.model["km_arr"][2],
+        #     (1.9, 3.19)
+        # )
+        self.irr_pars = PriorParams(
+            2,
+            self.refcategs[2],
+            self.model["fo_arr"][2],
+            self.model["kt_arr"][2],
+            self.model["zo_arr"][2],
+            self.model["a_arr"][2],
+            self.model["km_arr"][2],
+            self.model["mo"][2],
+            (-jnp.inf, 1.9)
+        )
+        
         self.add_data("model", self.model)
         self.add_handle("templates", data=self.templates_df, path=self.config.output)
 
@@ -593,9 +903,9 @@ class ShireInformer(CatInformer):
         all_tsels_df = self._load_templates()
         train_df = pd.DataFrame(
             data=jnp.column_stack(
-                (self.mags[:, :-1]-self.mags[:, 1:], self.szs)
+                (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
             ),
-            columns=self.color_names+[self.config["redshift_col"]]
+            columns=self.color_names+[self.config.ref_band, self.config.redshift_col]
         )
 
         leg1 = mlines.Line2D([], [], color='gray', label='LSST sim', marker='o', markersize=6, alpha=0.7, ls='')
@@ -641,9 +951,9 @@ class ShireInformer(CatInformer):
         all_tsels_df = self._load_templates()
         train_df = pd.DataFrame(
             data=jnp.column_stack(
-                (self.mags[:, :-1]-self.mags[:, 1:], self.szs)
+                (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
             ),
-            columns=self.color_names+[self.config["redshift_col"]]
+            columns=self.color_names+[self.config.ref_band, self.config.redshift_col]
         )
 
         train_patch = mpatches.Patch(edgecolor='k', facecolor='grey', label='LSST sim', alpha=0.7)
@@ -722,10 +1032,12 @@ class ShireInformer(CatInformer):
 
 
     def _nuvk_classif(self):
-        _mod_names = ["E_S0", "Sbc", "Scd", "Irr"]
+        _mod_names = self.refcategs
         self._load_training()
         all_tsels_df = self._load_templates()
-        all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
+        all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in self.prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
+        self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NUVK'] == _typ) for _typ in _mod_names ])
+        #self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NUVK'] == _typ)//self.pzs.shape[0]  for _typ in _mod_names ])
         return all_tsels_df
 
 
