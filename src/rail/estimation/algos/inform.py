@@ -444,6 +444,11 @@ class ShireInformer(CatInformer):
             (fo_init, kt_init, m0_init, z0_init, al_init, km_init)
         )
 
+        #def funconstr(X):
+        #    fo, kt, m0 = X[:self.ntyp], X[self.ntyp:2*self.ntyp], X[2*self.ntyp:3*self.ntyp]
+        #    vals = _vmap_frac((fo, kt), m0, self.refmags)
+        #    return jnp.nansum(vals, axis=0)
+
         constrmatrx = jnp.vstack(
             (
                 jnp.concatenate(
@@ -573,46 +578,46 @@ class ShireInformer(CatInformer):
     #@partial(jit, static_argnums=0)
     def _find_dndz_params(self):
         # initial parameters for zo, alpha, and km
+        mo_arr = []
         zo_arr = []
         a_arr = []
         km_arr = []
-        mo_arr = []
         print("Fitting prior parameters...")
         for i in range(self.ntyp):
             print(f"minimizing for type {i}")
             typmask = jnp.array([b == i for b in self.besttypes])
             _m = self.refmags[typmask]
             zarr = self.szs[typmask]
-            dndzparams = jnp.array([self.config.init_z0, self.config.init_alpha, self.config.init_km, self.config.init_m0])
+            dndzparams = jnp.array([self.config.init_m0, self.config.init_z0, self.config.init_alpha, self.config.init_km])
             Aconstraint = jnp.array(
                 [
-                    [1, 0, 0, 0],
                     [0, 0, 0, 0],
+                    [0, 1, 0, 0],
                     [0, 0, 0, 0],
                     [0, 0, 0, 0]
                 ]
             )
-            lb = jnp.array([0, -jnp.inf, -jnp.inf, -jnp.inf])
-            ub = jnp.array([jnp.inf, jnp.inf, jnp.inf, jnp.inf])
-            zoi, alfi, kmi, moi = sciop.minimize(
+            lb = jnp.array([0, 0, 0, 0])
+            ub = jnp.array([0, jnp.inf, 0, 0])
+            moi, zoi, alfi, kmi = sciop.minimize(
                 lambda P: self._dn_dz_likelihood(P, _m, zarr),
                 dndzparams,
-                method="Nelder-Mead", #"COBYQA",
-                # constraints=(
-                #     sciop.LinearConstraint(
-                #         Aconstraint,
-                #         lb,
-                #         ub
-                #     )
-                # )
-                #bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf)]
+                method="COBYQA", #"Nelder-Mead", #
+                constraints=(
+                    sciop.LinearConstraint(
+                        Aconstraint,
+                        lb,
+                        ub
+                    )
+                )
+                #bounds=[(0, jnp.inf), (0, jnp.inf), (-jnp.inf, jnp.inf), (-jnp.inf, jnp.inf)]
             ).x
+            mo_arr.append(moi)
             zo_arr.append(zoi)
             a_arr.append(alfi)
             km_arr.append(kmi)
-            mo_arr.append(moi)
-            print(f"best fit z0, alpha, km, m0 for type {i}: {zoi, alfi, kmi, moi}")
-        return jnp.array(zo_arr), jnp.array(km_arr), jnp.array(a_arr), jnp.array(mo_arr)
+            print(f"best fit m0, z0, alpha, km for type {i}: {moi, zoi, alfi, kmi}")
+        return jnp.array(mo_arr), jnp.array(zo_arr), jnp.array(km_arr), jnp.array(a_arr)
 
 
     def class_nuvk(self, test_df):
@@ -632,35 +637,9 @@ class ShireInformer(CatInformer):
 
         z0list, alflist, kmlist = self._fit_prior()
 
-        #fracs = jnp.array([ycounts[np.argwhere(yvals==refcat)[0]]/ytest.shape[0] for refcat in refcategs])
-        #self.fo_arr = fracs
-        #z0list, alflist, kmlist, molist = self._find_dndz_params()
+        #molist, z0list, alflist, kmlist = self._find_dndz_params()
         #self.m0 = molist
         #self._find_fractions()
-
-        '''
-        print("Fitting prior parameters...")
-        z0list = []
-        alflist = []
-        kmlist = []
-        for cat in self.refcategs:
-            print(f"Fitting type {cat}")
-            subdf = test_df[test_df['CAT_NUVK']==cat]
-            m_i = jnp.array(subdf[self.config.ref_band].values)
-            zs = jnp.array(subdf[self.config.redshift_col].values)
-            _nz, _bins = jnp.histogram(zs, bins=self.pzs, density=True)
-            nz = jnp.array([_nz[nbin] for nbin in jnp.digitize(zs, _bins)])
-            z0, alpha, km = sciop.curve_fit(
-                lambda mz, _z0, _alf, _km : vmap_dndz_gals(mz, _z0, _alf, _km, self.m0),
-                jnp.vstack((m_i, zs)).T,
-                nz,
-                p0=(self.config.init_z0, self.config.init_alpha, self.config.init_km)
-            )[0]
-            z0list.append(z0)
-            alflist.append(alpha)
-            kmlist.append(km)
-            print(f"best fit z0, alpha, km for type {cat}: {z0, alpha, km}")
-        '''
 
         return z0list, alflist, kmlist #jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist)
 
