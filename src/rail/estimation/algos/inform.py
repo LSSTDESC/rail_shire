@@ -624,11 +624,11 @@ class ShireInformer(CatInformer):
         #self._load_filters()
         all_tsels_df = self._nuvk_classif()
         classifier = RandomForestClassifier() # use defaults settings for now
-        X = np.array(all_tsels_df[self.color_names])
+        X = np.clip(all_tsels_df[self.color_names], -3.4e+38, 3.4e+38)
         y = np.array(all_tsels_df['CAT_NUVK'])
         classifier.fit(X, y)
 
-        Xtest = np.array(test_df[self.color_names])
+        Xtest = np.clip(test_df[self.color_names], -3.4e+38, 3.4e+38)
         ytest = classifier.predict(Xtest)
         #yvals, ycounts = np.unique(ytest, return_counts=True)
 
