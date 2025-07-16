@@ -46,6 +46,8 @@ from .template import (
     vmap_mean_spectrum_nodust,
     v_d4000n,
     calc_d4000n,
+    v_nuvk,
+    calc_nuvk,
     mean_spectrum_nodust,
     vmap_calc_eqw
 )
@@ -793,7 +795,7 @@ class ShireInformer(CatInformer):
         tables_io.write(
             templs_score_df,
             self.config.output,
-            fmt='hf5'
+            fmt='h5' #'hf5'
         )
 
         self.templates_df = templs_score_df[["name", "num", "score", "Dataset", self.config["redshift_col"]]+_DUMMY_PARS.PARAM_NAMES_FLAT]
@@ -1172,6 +1174,88 @@ class ShireInformer(CatInformer):
         return fig_list
 
     def plot_templ_seds(self, redshifts=None):
+        if redshifts is None:
+            redshifts = jnp.linspace(self.config.zmin, self.config.zmax, 6, endpoint=True)
+        elif isinstance(redshifts, (int, float, jnp.float32, jnp.float64, np.float32, np.float64)):
+            redshifts = jnp.array([redshifts])
+        elif isinstance(redshifts, (list, tuple, np.ndarray)):
+            redshifts = jnp.array(redshifts)
+        else:
+            assert isinstance(redshifts, jnp.ndarray), "Please specify the redshift as a single value or a list, tuple, numpy array or jax array of values."
+        wls, transm_arr = self._load_filters()
+        templ_pars = jnp.array(self.templates_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+        templ_zref = jnp.array(self.templates_df[self.config.redshift_col])
+        sspdata = load_ssp(
+            os.path.abspath(
+                os.path.join(
+                    self.data_path,
+                    "SSP",
+                    self.config.ssp_file
+                )
+            )
+        )
+        if "sps" in self.config.templ_type.lower():
+            restframe_fnus = lsunPerHz_to_fnu_noU(
+                vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
+                0.001
+            )
+            nuvk = v_nuvk(templ_pars, wls, redshifts, sspdata)
+            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
+            restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
+        else:
+            _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
+            _vnuvk = vmap(calc_nuvk, in_axes=(0, None, 0, None))
+            restframe_fnus = lsunPerHz_to_fnu_noU(
+                _vspec(wls, templ_pars, templ_zref, sspdata),
+                0.001
+            )
+            nuvk = _vnuvk(templ_pars, wls, templ_zref, sspdata)
+            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            norms = jnp.nanmean(restframe_fnus[:, _selnorm], axis=1)
+            restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 1)
+        
+        colrs = mpl.colormaps['tab10'].colors
+        clrdict = {_categ: colrs[icat] for icat, _categ in self.refcategs}
+
+        filtcols = plt.cm.rainbow(np.linspace(0, 1, transm_arr.shape[0]))
+        figlist = []
+        for iz, z in enumerate(redshifts):
+            f, a = plt.subplots(1,1, figsize=(7, 4), constrained_layout=True)
+            if "sps" in self.config.templ_type.lower():
+                for fnu, _nuvk in zip(restframe_fnus[:, iz, :], nuvk[:, iz, :], strict=True):
+                    _n = self.prior_mod(_nuvk) 
+                    classnuvk = self.refcategs[ _n]
+                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk])
+            else:
+                for fnu, _nuvk in zip(restframe_fnus, nuvk, strict=True):
+                    _n = self.prior_mod(_nuvk) 
+                    classnuvk = self.refcategs[ _n]
+                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk])
+            a.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
+            a.set_ylabel(r'Normalized Spectral Energy Density [-]') #$\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
+            aa = a.twinx()
+            for trans, fcol in zip(transm_arr, filtcols, strict=True):
+                aa.plot(wls, trans, c=tuple(fcol), lw=1)
+                aa.fill_between(wls, trans, alpha=0.3, color=tuple(fcol), lw=1)
+            aa.set_ylabel(r'Filter transmission / effective area [- / $\mathrm{m^2}$]')
+            #a.set_xscale('log')
+            a.set_yscale('log')
+            a.set_xlim(self.config.wlmin, self.config.wlmax+self.config.dwl)
+            a.grid()
+            _legends = []
+            for _cat, _colrs in clrdict.items():
+                _line = mlines.Line2D([], [], color=_colrs, label=_cat)
+                _legends.append(_line)
+            a.legend(handles=_legends)
+            a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
+            secax = a.secondary_xaxis('top', functions=(lambda wl: wl/(1+z), lambda wl: wl*(1+z)))
+            secax.set_xlabel(r'Resframe wavelength $\mathrm{[\AA]}$')
+            figlist.append(f)
+            plt.show()
+        return figlist
+
+    def plot_templ_seds_d4000(self, redshifts=None):
         if redshifts is None:
             redshifts = jnp.linspace(self.config.zmin, self.config.zmax, 6, endpoint=True)
         elif isinstance(redshifts, (int, float, jnp.float32, jnp.float64, np.float32, np.float64)):
