@@ -539,8 +539,8 @@ class ShireEstimator(CatEstimator):
         return val_prior
 
     vmap_nz_gals = vmap(_val_nz_prior, in_axes=(None, 0, None, None))
-    vmap_nz_nuvk = vmap(vmap_nz_gals, in_axes=(None, None, None, 0))
-    vmap_nz_z = vmap(vmap_nz_nuvk, in_axes=(None, None, 0, None))
+    vmap_nz_nuvk = vmap(vmap_nz_gals, in_axes=(None, None, None, 1))
+    vmap_nz_z = vmap(vmap_nz_nuvk, in_axes=(None, None, 0, 0))
 
     @partial(jit, static_argnums=0)
     def _val_frac_prior(self, oimag, nuvk):
@@ -560,8 +560,8 @@ class ShireEstimator(CatEstimator):
 
 
     vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None))
-    vmap_prior_nuvk = vmap(vmap_prior_gals, in_axes=(None, None, None, 0))
-    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, None))
+    vmap_prior_nuvk = vmap(vmap_prior_gals, in_axes=(None, None, None, 1))
+    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, 0))
 
     @partial(jit, static_argnums=0)
     def _prior(self, oimags, redz, nuvk):
