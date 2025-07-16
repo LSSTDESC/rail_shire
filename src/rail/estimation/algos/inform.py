@@ -847,6 +847,7 @@ class ShireInformer(CatInformer):
             self.model["a_arr"][0],
             self.model["km_arr"][0],
             self.model["mo"][0],
+            self.model["nt_array"][0],
             (4.25, jnp.inf)
         )
         self.sbcd_pars = PriorParams(
@@ -858,6 +859,7 @@ class ShireInformer(CatInformer):
             self.model["a_arr"][1],
             self.model["km_arr"][1],
             self.model["mo"][1],
+            self.model["nt_array"][1],
             (1.9, 4.25)
         )
         # self.sbc_pars = PriorParams(
@@ -889,6 +891,7 @@ class ShireInformer(CatInformer):
             self.model["a_arr"][2],
             self.model["km_arr"][2],
             self.model["mo"][2],
+            self.model["nt_array"][2],
             (-jnp.inf, 1.9)
         )
         
@@ -1197,8 +1200,8 @@ class ShireInformer(CatInformer):
                 else:
                     a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
                     a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
-                
-                #a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
+                a.set_xlim(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]))
+                a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
                 fig_list.append(f)
                 plt.show()
         return fig_list
