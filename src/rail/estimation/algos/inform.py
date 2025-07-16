@@ -1230,12 +1230,12 @@ class ShireInformer(CatInformer):
                 for fnu, _nuvk in zip(restframe_fnus[:, iz, :], nuvk[:, iz], strict=True):
                     _n = self.prior_mod(_nuvk) 
                     classnuvk = self.refcategs[ _n]
-                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk])
+                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk], alpha=0.6)
             else:
                 for fnu, _nuvk in zip(restframe_fnus, nuvk, strict=True):
                     _n = self.prior_mod(_nuvk) 
                     classnuvk = self.refcategs[ _n]
-                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk])
+                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk], alpha=0.6)
             a.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
             a.set_ylabel(r'Normalized Spectral Energy Density [-]') #$\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
             aa = a.twinx()
