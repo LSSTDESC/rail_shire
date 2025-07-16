@@ -33,8 +33,8 @@ from .analysis import _DUMMY_PARS, lsunPerHz_to_fnu_noU, C_KMS, convert_flux_too
 from .template import (
     vmap_cols_zo,
     vmap_cols_zo_leg,
-    colrs_bptrews_templ_zo,
-    colrs_bptrews_templ_zo_leg,
+    colrs_bptrews_templ_zo_dusty,
+    colrs_bptrews_templ_zo_dusty_leg,
     lim_HII_comp,
     lim_seyf_liner,
     Ka03_nii,
@@ -212,6 +212,7 @@ class ShireInformer(CatInformer):
         #self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, (1.9, 3.19))
         self.irr_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, (-jnp.inf, 1.9))
 
+    '''
     @partial(jit, static_argnums=0)
     def prior_mod(self, nuvk):
         """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
@@ -225,6 +226,28 @@ class ShireInformer(CatInformer):
             self.irr_pars.mod
             + (self.sbcd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
             + (self.e0_pars.mod - self.sbcd_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val.astype(int)
+    '''
+    
+    
+    @partial(jit, static_argnums=0)
+    def prior_mod(self, nuvk):
+        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: Model Id
+        :rtype: int
+        """
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.mod,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.mod,
+                self.sbcd_pars.mod
+            )
         )
         return val.astype(int)
 
@@ -335,7 +358,7 @@ class ShireInformer(CatInformer):
         if "sps" in self.config.templ_type.lower():
             templ_tupl = [tuple(_pars) for _pars in templ_pars_arr]
             templ_tupl_sps = tree_map(
-                lambda partup: colrs_bptrews_templ_zo(
+                lambda partup: colrs_bptrews_templ_zo_dusty(
                     jnp.array(partup),
                     fwls,
                     pzs,
@@ -348,7 +371,7 @@ class ShireInformer(CatInformer):
         else:
             templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(templ_pars_arr, templ_zref, strict=True)]
             templ_tupl_sps = tree_map(
-                lambda partup: colrs_bptrews_templ_zo_leg(
+                lambda partup: colrs_bptrews_templ_zo_dusty_leg(
                     jnp.array(partup[:-1]),
                     fwls,
                     pzs,
@@ -1161,7 +1184,6 @@ class ShireInformer(CatInformer):
                 if "NII" in cat:
                     a.plot(_x, Ka03_nii(_x), 'k-', lw=1)
                     a.plot(_x, Ke01_nii(_x), 'k-', lw=1)
-                    a.set_xlim(np.nanmin(all_tsels_df[x]), 0.0)
                 elif "SII" in cat:
                     a.plot(_x, Ke01_sii(_x), 'k-', lw=1)
                     a.plot(_x, Ke06_sii(_x), 'k-', lw=1)
