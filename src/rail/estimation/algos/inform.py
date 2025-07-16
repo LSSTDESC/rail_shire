@@ -43,12 +43,12 @@ from .template import (
     Ke01_sii,
     Ke06_oi,
     Ke06_sii,
-    vmap_mean_spectrum_nodust,
+    vmap_mean_spectrum,
     v_d4000n,
     calc_d4000n,
     v_nuvk,
     calc_nuvk,
-    mean_spectrum_nodust,
+    mean_spectrum,
     vmap_calc_eqw
 )
 from .filter import get_sedpy
@@ -1222,7 +1222,7 @@ class ShireInformer(CatInformer):
         )
         if "sps" in self.config.templ_type.lower():
             restframe_fnus = lsunPerHz_to_fnu_noU(
-                vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
+                vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
             nuvk = v_nuvk(templ_pars, wls, redshifts, sspdata)
@@ -1230,7 +1230,7 @@ class ShireInformer(CatInformer):
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
-            _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
+            _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
             _vnuvk = vmap(calc_nuvk, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
@@ -1304,7 +1304,7 @@ class ShireInformer(CatInformer):
         )
         if "sps" in self.config.templ_type.lower():
             restframe_fnus = lsunPerHz_to_fnu_noU(
-                vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
+                vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
             d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
@@ -1312,7 +1312,7 @@ class ShireInformer(CatInformer):
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
-            _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
+            _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
             _vd4k = vmap(calc_d4000n, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
@@ -1395,7 +1395,7 @@ class ShireInformer(CatInformer):
         )
 
         wls = jnp.arange(3500., 7000., 0.1)
-        sed = mean_spectrum_nodust(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum_nodust(wls, pars, zref, sspdata)
+        sed = mean_spectrum(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum(wls, pars, zref, sspdata)
         eqws = vmap_calc_eqw(wls, sed, lines)
         fnu = lsunPerHz_to_fnu_noU(sed, 0.001)
 
