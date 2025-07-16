@@ -900,9 +900,12 @@ class ShireInformer(CatInformer):
         self.finalize()
         return self.get_handle("model"), self.get_handle("templates")
 
-    def plot_colrs_templates(self):
+    def plot_colrs_templates(self, hue='CAT_NUVK', style='Dataset', order=None):
+        if order is None and hue=='CAT_NUVK':
+            order=self.refcategs
+
         self._load_training()
-        all_tsels_df = self._load_templates()
+        all_tsels_df = self._nuvk_classif()
         train_df = pd.DataFrame(
             data=jnp.column_stack(
                 (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
@@ -936,8 +939,9 @@ class ShireInformer(CatInformer):
                 size='z_p',
                 sizes=(10, 100),
                 alpha=0.5,
-                hue='Dataset',
-                style='Dataset',
+                hue=hue,
+                hue_order=order,
+                style=style,
                 legend='brief'
             )
             a.grid()
@@ -948,9 +952,9 @@ class ShireInformer(CatInformer):
             plt.show()
         return fig_list
 
-    def hist_colrs_templates(self):
+    def hist_colrs_templates(self, hue='Dataset'):
         self._load_training()
-        all_tsels_df = self._load_templates()
+        all_tsels_df = self._nuvk_classif()
         train_df = pd.DataFrame(
             data=jnp.column_stack(
                 (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
@@ -987,7 +991,7 @@ class ShireInformer(CatInformer):
                 bins=_edges1d,
                 stat='density',
                 multiple='stack',
-                hue='Dataset',
+                hue=hue,
                 alpha=0.7,
                 ax=a,
                 legend=True
@@ -1216,14 +1220,14 @@ class ShireInformer(CatInformer):
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 1)
         
         colrs = mpl.colormaps['tab10'].colors
-        clrdict = {_categ: colrs[icat] for icat, _categ in self.refcategs}
+        clrdict = {_categ: colrs[icat] for icat, _categ in enumerate(self.refcategs)}
 
         filtcols = plt.cm.rainbow(np.linspace(0, 1, transm_arr.shape[0]))
         figlist = []
         for iz, z in enumerate(redshifts):
             f, a = plt.subplots(1,1, figsize=(7, 4), constrained_layout=True)
             if "sps" in self.config.templ_type.lower():
-                for fnu, _nuvk in zip(restframe_fnus[:, iz, :], nuvk[:, iz, :], strict=True):
+                for fnu, _nuvk in zip(restframe_fnus[:, iz, :], nuvk[:, iz], strict=True):
                     _n = self.prior_mod(_nuvk) 
                     classnuvk = self.refcategs[ _n]
                     a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk])
