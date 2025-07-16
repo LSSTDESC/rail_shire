@@ -44,10 +44,14 @@ from .template import (
     Ke06_oi,
     Ke06_sii,
     vmap_mean_spectrum,
-    v_d4000n,
-    calc_d4000n,
-    v_nuvk,
-    calc_nuvk,
+    #v_d4000n,
+    v_d4000n_dusty,
+    #calc_d4000n,
+    calc_d4000n_dusty,
+    #v_nuvk,
+    v_nuvk_dusty,
+    #calc_nuvk,
+    calc_nuvk_dusty,
     mean_spectrum,
     vmap_calc_eqw
 )
@@ -56,7 +60,7 @@ from .filter import get_sedpy
 
 jax.config.update("jax_enable_x64", True)
 
-PriorParams = namedtuple("PriorParams", ["mod", "type", "fo", "kt", "z0", "alpha", "km", "m0", "nuv_range"])
+PriorParams = namedtuple("PriorParams", ["mod", "type", "fo", "kt", "z0", "alpha", "km", "m0", "nt", "nuv_range"])
 
 @jit
 def nz_func(mz, z0, alpha, km, m0):  # pragma: no cover
@@ -206,16 +210,16 @@ class ShireInformer(CatInformer):
         self.templates_df = None
         self.filters_names = None
         self.color_names = None
-        self.e0_pars = PriorParams(0, self.refcategs[0], None, None, None, None, None, None, (4.25, jnp.inf))
-        self.sbcd_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, (1.9, 4.25))
-        #self.sbc_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, (3.1.9, 4.25))
-        #self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, (1.9, 3.19))
-        self.irr_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, (-jnp.inf, 1.9))
+        self.e0_pars = PriorParams(0, self.refcategs[0], None, None, None, None, None, None, None, (4.25, jnp.inf))
+        self.sbcd_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, None, (1.9, 4.25))
+        #self.sbc_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, None, (3.1.9, 4.25))
+        #self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, None, (1.9, 3.19))
+        self.irr_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, None, (-jnp.inf, 1.9))
 
     '''
     @partial(jit, static_argnums=0)
     def prior_mod(self, nuvk):
-        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+        """prior_mod Determines the model (galaxy morphology) for which to compute the prior value.
 
         :param nuvk: Emitted UV-IR color index of the galaxy
         :type nuvk: float
@@ -233,7 +237,7 @@ class ShireInformer(CatInformer):
     
     @partial(jit, static_argnums=0)
     def prior_mod(self, nuvk):
-        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+        """prior_mod Determines the model (galaxy morphology) for which to compute the prior value.
 
         :param nuvk: Emitted UV-IR color index of the galaxy
         :type nuvk: float
@@ -1225,13 +1229,13 @@ class ShireInformer(CatInformer):
                 vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
-            nuvk = v_nuvk(templ_pars, wls, redshifts, sspdata)
+            nuvk = v_nuvk_dusty(templ_pars, wls, redshifts, sspdata)
             _selnorm = jnp.logical_and(wls>3950, wls<4000)
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
             _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
-            _vnuvk = vmap(calc_nuvk, in_axes=(0, None, 0, None))
+            _vnuvk = vmap(calc_nuvk_dusty, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
                 0.001
@@ -1307,13 +1311,13 @@ class ShireInformer(CatInformer):
                 vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
-            d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
+            d4000n = v_d4000n_dusty(templ_pars, wls, redshifts, sspdata)
             _selnorm = jnp.logical_and(wls>3950, wls<4000)
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
             _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
-            _vd4k = vmap(calc_d4000n, in_axes=(0, None, 0, None))
+            _vd4k = vmap(calc_d4000n_dusty, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
                 0.001

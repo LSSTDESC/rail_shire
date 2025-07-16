@@ -12,7 +12,7 @@ from rail.core.common_params import SHARED_PARAMS
 from rail.core.data import TableHandle, ModelHandle
 
 from .analysis import _DUMMY_PARS, PARS_DF, vmap_mean, vmap_median
-from .galaxy import vmap_mags_to_i_and_colors, likelihood
+from .galaxy import vmap_mags_to_i_and_colors, likelihood, vmap_neg_log_likelihood
 from .filter import get_sedpy
 from .template import make_legacy_templates, make_sps_templates, istuple
 from .io_utils import load_ssp, SHIREDATALOC
@@ -175,6 +175,7 @@ class ShireEstimator(CatEstimator):
             self.modeldict["a_arr"][0],
             self.modeldict["km_arr"][0],
             self.modeldict["mo"][0],
+            self.modeldict["nt_array"][0],
             (4.25, jnp.inf)
         )
         self.sbcd_pars = PriorParams(
@@ -186,6 +187,7 @@ class ShireEstimator(CatEstimator):
             self.modeldict["a_arr"][1],
             self.modeldict["km_arr"][1],
             self.modeldict["mo"][1],
+            self.modeldict["nt_array"][1],
             (1.9, 4.25)
         )
         # self.sbc_pars = PriorParams(
@@ -217,6 +219,7 @@ class ShireEstimator(CatEstimator):
             self.modeldict["a_arr"][2],
             self.modeldict["km_arr"][2],
             self.modeldict["mo"][2],
+            self.modeldict["nt_array"][2],
             (-jnp.inf, 1.9)
         )
 
@@ -489,19 +492,45 @@ class ShireEstimator(CatEstimator):
 
     @partial(jit, static_argnums=0)
     def prior_mod(self, nuvk):
-        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+        """prior_mod Determines the model (galaxy morphology) for which to compute the prior value.
 
         :param nuvk: Emitted UV-IR color index of the galaxy
         :type nuvk: float
         :return: Model Id
         :rtype: int
         """
-        val = (
-            self.irr_pars.mod
-            + (self.sbcd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
-            + (self.e0_pars.mod - self.sbcd_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.mod,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.mod,
+                self.sbcd_pars.mod
+            )
         )
         return val.astype(int)
+
+
+    @partial(jit, static_argnums=0)
+    def prior_nt(self, nuvk):
+        """prior_nt Determines the number of templates for which to compute the prior value.
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: Number of templates of a given broad type
+        :rtype: float
+        """
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.nt,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.nt,
+                self.sbcd_pars.nt
+            )
+        )
+        return val
+
 
     @partial(jit, static_argnums=0)
     def _val_nz_prior(self, oimag, z, nuvk):
@@ -510,31 +539,35 @@ class ShireEstimator(CatEstimator):
         return val_prior
 
     vmap_nz_gals = vmap(_val_nz_prior, in_axes=(None, 0, None, None))
-    vmap_nz_z = vmap(vmap_nz_gals, in_axes=(None, None, 0, None))
+    vmap_nz_nuvk = vmap(vmap_nz_gals, in_axes=(None, None, None, 0))
+    vmap_nz_z = vmap(vmap_nz_nuvk, in_axes=(None, None, 0, None))
 
     @partial(jit, static_argnums=0)
-    def _val_frac_prior(self, oimag, nuvk, nt):
-        fo, kt, m0 = self.prior_fo(nuvk), self.prior_kt(nuvk), self.prior_m0(nuvk)
-        val_prior = frac_func((fo/nt, kt), m0, oimag)
+    def _val_frac_prior(self, oimag, nuvk):
+        fo, kt, m0, nt = self.prior_fo(nuvk), self.prior_kt(nuvk), self.prior_m0(nuvk), self.prior_nt(nuvk)
+        val_prior = frac_func((fo, kt), m0, oimag)/nt
         return val_prior
 
-    vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None, None))
+    vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None))
+    vmap_frac_nuvk = vmap(vmap_frac_gals, in_axes=(None, None, 0))
 
 
     @partial(jit, static_argnums=0)
-    def _val_prior(self, oimag, z, nuvk, nt):
+    def _val_prior(self, oimag, z, nuvk):
         nzval = self._val_nz_prior(oimag, z, nuvk)
-        fracval = self._val_frac_prior(oimag, nuvk, nt)
+        fracval = self._val_frac_prior(oimag, nuvk)
         return nzval*fracval
 
 
-    vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None, None))
-    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, None, None))
+    vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None))
+    vmap_prior_nuvk = vmap(vmap_prior_gals, in_axes=(None, None, None, 0))
+    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, None))
 
     @partial(jit, static_argnums=0)
-    def _prior(self, oimags, redz, nuvk, nt):
+    def _prior(self, oimags, redz, nuvk):
         #corrmags = jnp.where(oimags<self.modeldict['mo'], self.modeldict['mo'], oimags)
-        vals = self.vmap_prior_z(oimags, redz, nuvk, nt)
+        vals = self.vmap_prior_z(oimags, redz, nuvk)
+        #valmax = jnp.nanmax(vals, axis=1)
         norm = trapezoid(vals, x=redz, axis=0)
         return vals/norm
 
@@ -549,8 +582,12 @@ class ShireEstimator(CatEstimator):
             )
         else:
             def _posterior(sedcols, ocols, onoise, oimags, redz, nuvks):
-                nt = self.prior_mod(nuvks[0][0])
-                return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks[0][0], nt) # prior is computed for the template without dust
+                _nllik = vmap_neg_log_likelihood(sedcols, ocols, onoise)
+                _pz = jnp.exp(-0.5 * _nllik)
+                _prior = self._prior(oimags, redz, nuvks)
+                _vals = _pz*_prior
+                return jnp.nanmax(_vals, axis=1)
+                #return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks[0][0]) # prior is computed for the template without dust
             
             probz_arr = tree_map(
                 lambda sed_tupl: _posterior(sed_tupl[0], observed_colors, observed_noise, observed_imags, self.zgrid, sed_tupl[1]),
