@@ -397,10 +397,14 @@ class ShireEstimator(CatEstimator):
         :return: z0
         :rtype: float
         """
-        val = (
-            self.irr_pars.z0
-            + (self.sbcd_pars.z0 - self.irr_pars.z0) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
-            + (self.e0_pars.z0 - self.sbcd_pars.z0) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.z0,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.z0,
+                self.sbcd_pars.z0
+            )
         )
         return val
 
@@ -414,10 +418,14 @@ class ShireEstimator(CatEstimator):
         :return: m0
         :rtype: float
         """
-        val = (
-            self.irr_pars.m0
-            + (self.sbcd_pars.m0 - self.irr_pars.m0) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
-            + (self.e0_pars.m0 - self.sbcd_pars.m0) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.m0,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.m0,
+                self.sbcd_pars.m0
+            )
         )
         return val
 
@@ -431,10 +439,14 @@ class ShireEstimator(CatEstimator):
         :return: alpha0
         :rtype: float
         """
-        val = (
-            self.irr_pars.alpha
-            + (self.sbcd_pars.alpha - self.irr_pars.alpha) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
-            + (self.e0_pars.alpha - self.sbcd_pars.alpha) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.alpha,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.alpha,
+                self.sbcd_pars.alpha
+            )
         )
         return val
 
@@ -448,10 +460,14 @@ class ShireEstimator(CatEstimator):
         :return: k
         :rtype: float
         """
-        val = (
-            self.irr_pars.km
-            + (self.sbcd_pars.km - self.irr_pars.km) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
-            + (self.e0_pars.km - self.sbcd_pars.km) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.km,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.km,
+                self.sbcd_pars.km
+            )
         )
         return val
 
@@ -465,10 +481,14 @@ class ShireEstimator(CatEstimator):
         :return: fo
         :rtype: float
         """
-        val = (
-            self.irr_pars.fo
-            + (self.sbcd_pars.fo - self.irr_pars.fo) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
-            + (self.e0_pars.fo - self.sbcd_pars.fo) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.fo,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.fo,
+                self.sbcd_pars.fo
+            )
         )
         return val
 
@@ -482,10 +502,14 @@ class ShireEstimator(CatEstimator):
         :return: kt
         :rtype: float
         """
-        val = (
-            self.irr_pars.kt
-            + (self.sbcd_pars.kt - self.irr_pars.kt) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
-            + (self.e0_pars.kt - self.sbcd_pars.kt) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.kt,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.kt,
+                self.sbcd_pars.kt
+            )
         )
         return val
 
