@@ -561,7 +561,7 @@ class ShireEstimator(CatEstimator):
 
     vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None))
     vmap_prior_nuvk = vmap(vmap_prior_gals, in_axes=(None, None, None, 1))
-    vmap_prior_z = vmap(vmap_prior_gals, in_axes=(None, None, 0, 0))
+    vmap_prior_z = vmap(vmap_prior_nuvk, in_axes=(None, None, 0, 0))
 
     @partial(jit, static_argnums=0)
     def _prior(self, oimags, redz, nuvk):
