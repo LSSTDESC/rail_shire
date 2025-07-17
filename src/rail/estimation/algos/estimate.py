@@ -539,7 +539,7 @@ class ShireEstimator(CatEstimator):
         return val_prior
 
     vmap_nz_gals = vmap(_val_nz_prior, in_axes=(None, 0, None, None))
-    vmap_nz_nuvk = vmap(vmap_nz_gals, in_axes=(None, None, None, 1))
+    vmap_nz_nuvk = vmap(vmap_nz_gals, in_axes=(None, None, None, 0))
     vmap_nz_z = vmap(vmap_nz_nuvk, in_axes=(None, None, 0, 0))
 
     @partial(jit, static_argnums=0)
@@ -560,7 +560,7 @@ class ShireEstimator(CatEstimator):
 
 
     vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None))
-    vmap_prior_nuvk = vmap(vmap_prior_gals, in_axes=(None, None, None, 1))
+    vmap_prior_nuvk = vmap(vmap_prior_gals, in_axes=(None, None, None, 0))
     vmap_prior_z = vmap(vmap_prior_nuvk, in_axes=(None, None, 0, 0))
 
     @partial(jit, static_argnums=0)
@@ -568,8 +568,8 @@ class ShireEstimator(CatEstimator):
         #corrmags = jnp.where(oimags<self.modeldict['mo'], self.modeldict['mo'], oimags)
         vals = self.vmap_prior_z(oimags, redz, nuvk)
         #valmax = jnp.nanmax(vals, axis=1)
-        norm = trapezoid(vals, x=redz, axis=0)
-        return vals/norm
+        #norm = trapezoid(vals, x=redz, axis=0)
+        return vals #/norm
 
 
     def _estimate_pdf(self, templ_tuples, observed_colors, observed_noise, observed_imags):
