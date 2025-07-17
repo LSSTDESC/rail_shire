@@ -33,8 +33,8 @@ from .analysis import _DUMMY_PARS, lsunPerHz_to_fnu_noU, C_KMS, convert_flux_too
 from .template import (
     vmap_cols_zo,
     vmap_cols_zo_leg,
-    colrs_bptrews_templ_zo,
-    colrs_bptrews_templ_zo_leg,
+    colrs_bptrews_templ_zo_dusty,
+    colrs_bptrews_templ_zo_dusty_leg,
     lim_HII_comp,
     lim_seyf_liner,
     Ka03_nii,
@@ -43,10 +43,16 @@ from .template import (
     Ke01_sii,
     Ke06_oi,
     Ke06_sii,
-    vmap_mean_spectrum_nodust,
-    v_d4000n,
-    calc_d4000n,
-    mean_spectrum_nodust,
+    vmap_mean_spectrum,
+    #v_d4000n,
+    v_d4000n_dusty,
+    #calc_d4000n,
+    calc_d4000n_dusty,
+    #v_nuvk,
+    v_nuvk_dusty,
+    #calc_nuvk,
+    calc_nuvk_dusty,
+    mean_spectrum,
     vmap_calc_eqw
 )
 from .filter import get_sedpy
@@ -54,7 +60,7 @@ from .filter import get_sedpy
 
 jax.config.update("jax_enable_x64", True)
 
-PriorParams = namedtuple("PriorParams", ["mod", "type", "fo", "kt", "z0", "alpha", "km", "m0", "nuv_range"])
+PriorParams = namedtuple("PriorParams", ["mod", "type", "fo", "kt", "z0", "alpha", "km", "m0", "nt", "nuv_range"])
 
 @jit
 def nz_func(mz, z0, alpha, km, m0):  # pragma: no cover
@@ -149,7 +155,7 @@ class ShireInformer(CatInformer):
         ),
         wlmax=Param(
             float,
-            15000.,
+            25000.,
             msg='wlmax (float): upper bound of wavelength grid for filters interpolation'
         ),
         dwl=Param(
@@ -204,15 +210,16 @@ class ShireInformer(CatInformer):
         self.templates_df = None
         self.filters_names = None
         self.color_names = None
-        self.e0_pars = PriorParams(0, self.refcategs[0], None, None, None, None, None, None, (4.25, jnp.inf))
-        self.sbcd_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, (1.9, 4.25))
-        #self.sbc_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, (3.1.9, 4.25))
-        #self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, (1.9, 3.19))
-        self.irr_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, (-jnp.inf, 1.9))
+        self.e0_pars = PriorParams(0, self.refcategs[0], None, None, None, None, None, None, None, (4.25, jnp.inf))
+        self.sbcd_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, None, (1.9, 4.25))
+        #self.sbc_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, None, (3.1.9, 4.25))
+        #self.scd_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, None, (1.9, 3.19))
+        self.irr_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, None, (-jnp.inf, 1.9))
 
+    '''
     @partial(jit, static_argnums=0)
     def prior_mod(self, nuvk):
-        """prior_z0 Determines the model (galaxy morphology) for which to compute the prior value.
+        """prior_mod Determines the model (galaxy morphology) for which to compute the prior value.
 
         :param nuvk: Emitted UV-IR color index of the galaxy
         :type nuvk: float
@@ -223,6 +230,28 @@ class ShireInformer(CatInformer):
             self.irr_pars.mod
             + (self.sbcd_pars.mod - self.irr_pars.mod) * jnp.heaviside(nuvk - self.sbcd_pars.nuv_range[0], 0)
             + (self.e0_pars.mod - self.sbcd_pars.mod) * jnp.heaviside(nuvk - self.e0_pars.nuv_range[0], 0)
+        )
+        return val.astype(int)
+    '''
+    
+    
+    @partial(jit, static_argnums=0)
+    def prior_mod(self, nuvk):
+        """prior_mod Determines the model (galaxy morphology) for which to compute the prior value.
+
+        :param nuvk: Emitted UV-IR color index of the galaxy
+        :type nuvk: float
+        :return: Model Id
+        :rtype: int
+        """
+        val = jnp.where(
+            nuvk >= self.e0_pars.nuv_range[0],
+            self.e0_pars.mod,
+            jnp.where(
+                nuvk < self.irr_pars.nuv_range[1],
+                self.irr_pars.mod,
+                self.sbcd_pars.mod
+            )
         )
         return val.astype(int)
 
@@ -279,7 +308,7 @@ class ShireInformer(CatInformer):
             training_data[self.config["redshift_col"]]
         )
 
-        self.pzs = np.histogram_bin_edges(self.szs, bins='auto')
+        self.pzs = jnp.histogram_bin_edges(self.szs, bins=100) #'auto')
 
     def _load_filters(self):
         wls = jnp.arange(
@@ -333,7 +362,7 @@ class ShireInformer(CatInformer):
         if "sps" in self.config.templ_type.lower():
             templ_tupl = [tuple(_pars) for _pars in templ_pars_arr]
             templ_tupl_sps = tree_map(
-                lambda partup: colrs_bptrews_templ_zo(
+                lambda partup: colrs_bptrews_templ_zo_dusty(
                     jnp.array(partup),
                     fwls,
                     pzs,
@@ -346,7 +375,7 @@ class ShireInformer(CatInformer):
         else:
             templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(templ_pars_arr, templ_zref, strict=True)]
             templ_tupl_sps = tree_map(
-                lambda partup: colrs_bptrews_templ_zo_leg(
+                lambda partup: colrs_bptrews_templ_zo_dusty_leg(
                     jnp.array(partup[:-1]),
                     fwls,
                     pzs,
@@ -372,7 +401,7 @@ class ShireInformer(CatInformer):
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_df.iterrows()):
             _colrrews = templ_tupl_sps[it]
-            _df = pd.DataFrame(columns=color_names+['NUVK', 'D4000n']+lines_names, data=_colrrews)
+            _df = pd.DataFrame(columns=color_names+lines_names+['NUVK', 'D4000n'], data=_colrrews)
             _df['z_p'] = pzs
             _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
             _df['name'] = np.full(pzs.shape, tname)
@@ -624,11 +653,11 @@ class ShireInformer(CatInformer):
         #self._load_filters()
         all_tsels_df = self._nuvk_classif()
         classifier = RandomForestClassifier() # use defaults settings for now
-        X = np.array(all_tsels_df[self.color_names])
+        X = np.clip(all_tsels_df[self.color_names], -3.4e+38, 3.4e+38)
         y = np.array(all_tsels_df['CAT_NUVK'])
         classifier.fit(X, y)
 
-        Xtest = np.array(test_df[self.color_names])
+        Xtest = np.clip(test_df[self.color_names], -3.4e+38, 3.4e+38)
         ytest = classifier.predict(Xtest)
         #yvals, ycounts = np.unique(ytest, return_counts=True)
 
@@ -793,7 +822,7 @@ class ShireInformer(CatInformer):
         tables_io.write(
             templs_score_df,
             self.config.output,
-            fmt='hf5'
+            fmt='h5' #'hf5'
         )
 
         self.templates_df = templs_score_df[["name", "num", "score", "Dataset", self.config["redshift_col"]]+_DUMMY_PARS.PARAM_NAMES_FLAT]
@@ -818,6 +847,7 @@ class ShireInformer(CatInformer):
             self.model["a_arr"][0],
             self.model["km_arr"][0],
             self.model["mo"][0],
+            self.model["nt_array"][0],
             (4.25, jnp.inf)
         )
         self.sbcd_pars = PriorParams(
@@ -829,6 +859,7 @@ class ShireInformer(CatInformer):
             self.model["a_arr"][1],
             self.model["km_arr"][1],
             self.model["mo"][1],
+            self.model["nt_array"][1],
             (1.9, 4.25)
         )
         # self.sbc_pars = PriorParams(
@@ -860,6 +891,7 @@ class ShireInformer(CatInformer):
             self.model["a_arr"][2],
             self.model["km_arr"][2],
             self.model["mo"][2],
+            self.model["nt_array"][2],
             (-jnp.inf, 1.9)
         )
         
@@ -898,9 +930,12 @@ class ShireInformer(CatInformer):
         self.finalize()
         return self.get_handle("model"), self.get_handle("templates")
 
-    def plot_colrs_templates(self):
+    def plot_colrs_templates(self, hue='CAT_NUVK', style='Dataset', order=None):
+        if order is None and hue=='CAT_NUVK':
+            order=self.refcategs
+
         self._load_training()
-        all_tsels_df = self._load_templates()
+        all_tsels_df = self._nuvk_classif()
         train_df = pd.DataFrame(
             data=jnp.column_stack(
                 (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
@@ -934,8 +969,9 @@ class ShireInformer(CatInformer):
                 size='z_p',
                 sizes=(10, 100),
                 alpha=0.5,
-                hue='Dataset',
-                style='Dataset',
+                hue=hue,
+                hue_order=order,
+                style=style,
                 legend='brief'
             )
             a.grid()
@@ -946,9 +982,9 @@ class ShireInformer(CatInformer):
             plt.show()
         return fig_list
 
-    def hist_colrs_templates(self):
+    def hist_colrs_templates(self, hue='Dataset'):
         self._load_training()
-        all_tsels_df = self._load_templates()
+        all_tsels_df = self._nuvk_classif()
         train_df = pd.DataFrame(
             data=jnp.column_stack(
                 (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
@@ -985,7 +1021,7 @@ class ShireInformer(CatInformer):
                 bins=_edges1d,
                 stat='density',
                 multiple='stack',
-                hue='Dataset',
+                hue=hue,
                 alpha=0.7,
                 ax=a,
                 legend=True
@@ -1155,7 +1191,6 @@ class ShireInformer(CatInformer):
                 if "NII" in cat:
                     a.plot(_x, Ka03_nii(_x), 'k-', lw=1)
                     a.plot(_x, Ke01_nii(_x), 'k-', lw=1)
-                    a.set_xlim(np.nanmin(all_tsels_df[x]), 0.0)
                 elif "SII" in cat:
                     a.plot(_x, Ke01_sii(_x), 'k-', lw=1)
                     a.plot(_x, Ke06_sii(_x), 'k-', lw=1)
@@ -1165,8 +1200,8 @@ class ShireInformer(CatInformer):
                 else:
                     a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
                     a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
-                
-                #a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
+                a.set_xlim(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]))
+                a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
                 fig_list.append(f)
                 plt.show()
         return fig_list
@@ -1194,16 +1229,98 @@ class ShireInformer(CatInformer):
         )
         if "sps" in self.config.templ_type.lower():
             restframe_fnus = lsunPerHz_to_fnu_noU(
-                vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
+                vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
-            d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
+            nuvk = v_nuvk_dusty(templ_pars, wls, redshifts, sspdata)
             _selnorm = jnp.logical_and(wls>3950, wls<4000)
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
-            _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
-            _vd4k = vmap(calc_d4000n, in_axes=(0, None, 0, None))
+            _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
+            _vnuvk = vmap(calc_nuvk_dusty, in_axes=(0, None, 0, None))
+            restframe_fnus = lsunPerHz_to_fnu_noU(
+                _vspec(wls, templ_pars, templ_zref, sspdata),
+                0.001
+            )
+            nuvk = _vnuvk(templ_pars, wls, templ_zref, sspdata)
+            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            norms = jnp.nanmean(restframe_fnus[:, _selnorm], axis=1)
+            restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 1)
+        
+        colrs = mpl.colormaps['tab10'].colors
+        clrdict = {_categ: colrs[icat] for icat, _categ in enumerate(self.refcategs)}
+
+        filtcols = plt.cm.rainbow(np.linspace(0, 1, transm_arr.shape[0]))
+        figlist = []
+        for iz, z in enumerate(redshifts):
+            f, a = plt.subplots(1,1, figsize=(7, 4), constrained_layout=True)
+            if "sps" in self.config.templ_type.lower():
+                for fnu, _nuvk in zip(restframe_fnus[:, iz, :], nuvk[:, iz], strict=True):
+                    _n = self.prior_mod(_nuvk) 
+                    classnuvk = self.refcategs[ _n]
+                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk], alpha=0.6)
+            else:
+                for fnu, _nuvk in zip(restframe_fnus, nuvk, strict=True):
+                    _n = self.prior_mod(_nuvk) 
+                    classnuvk = self.refcategs[ _n]
+                    a.plot(*convert_flux_toobsframe(wls, fnu, z), c=clrdict[classnuvk], alpha=0.6)
+            a.set_xlabel(r'Observed wavelength $\mathrm{[\AA]}$')
+            a.set_ylabel(r'Normalized Spectral Energy Density [-]') #$\mathrm{[erg.s^{-1}.cm^{-2}.Hz^{-1}]}$')
+            aa = a.twinx()
+            for trans, fcol in zip(transm_arr, filtcols, strict=True):
+                aa.plot(wls, trans, c=tuple(fcol), lw=1)
+                aa.fill_between(wls, trans, alpha=0.3, color=tuple(fcol), lw=1)
+            aa.set_ylabel(r'Filter transmission / effective area [- / $\mathrm{m^2}$]')
+            #a.set_xscale('log')
+            a.set_yscale('log')
+            a.set_xlim(self.config.wlmin, self.config.wlmax+self.config.dwl)
+            a.grid()
+            _legends = []
+            for _cat, _colrs in clrdict.items():
+                _line = mlines.Line2D([], [], color=_colrs, label=_cat)
+                _legends.append(_line)
+            a.legend(handles=_legends)
+            a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
+            secax = a.secondary_xaxis('top', functions=(lambda wl: wl/(1+z), lambda wl: wl*(1+z)))
+            secax.set_xlabel(r'Resframe wavelength $\mathrm{[\AA]}$')
+            figlist.append(f)
+            plt.show()
+        return figlist
+
+    def plot_templ_seds_d4000(self, redshifts=None):
+        if redshifts is None:
+            redshifts = jnp.linspace(self.config.zmin, self.config.zmax, 6, endpoint=True)
+        elif isinstance(redshifts, (int, float, jnp.float32, jnp.float64, np.float32, np.float64)):
+            redshifts = jnp.array([redshifts])
+        elif isinstance(redshifts, (list, tuple, np.ndarray)):
+            redshifts = jnp.array(redshifts)
+        else:
+            assert isinstance(redshifts, jnp.ndarray), "Please specify the redshift as a single value or a list, tuple, numpy array or jax array of values."
+        wls, transm_arr = self._load_filters()
+        templ_pars = jnp.array(self.templates_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+        templ_zref = jnp.array(self.templates_df[self.config.redshift_col])
+        sspdata = load_ssp(
+            os.path.abspath(
+                os.path.join(
+                    self.data_path,
+                    "SSP",
+                    self.config.ssp_file
+                )
+            )
+        )
+        if "sps" in self.config.templ_type.lower():
+            restframe_fnus = lsunPerHz_to_fnu_noU(
+                vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
+                0.001
+            )
+            d4000n = v_d4000n_dusty(templ_pars, wls, redshifts, sspdata)
+            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
+            restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
+        else:
+            _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
+            _vd4k = vmap(calc_d4000n_dusty, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
                 0.001
@@ -1285,7 +1402,7 @@ class ShireInformer(CatInformer):
         )
 
         wls = jnp.arange(3500., 7000., 0.1)
-        sed = mean_spectrum_nodust(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum_nodust(wls, pars, zref, sspdata)
+        sed = mean_spectrum(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum(wls, pars, zref, sspdata)
         eqws = vmap_calc_eqw(wls, sed, lines)
         fnu = lsunPerHz_to_fnu_noU(sed, 0.001)
 
