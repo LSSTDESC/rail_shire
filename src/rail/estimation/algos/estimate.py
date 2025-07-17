@@ -553,7 +553,7 @@ class ShireEstimator(CatEstimator):
                 self.sbcd_pars.nt
             )
         )
-        return val
+        return val.astype(int)
 
 
     @partial(jit, static_argnums=0)
@@ -569,7 +569,7 @@ class ShireEstimator(CatEstimator):
     @partial(jit, static_argnums=0)
     def _val_frac_prior(self, oimag, nuvk):
         fo, kt, m0, nt = self.prior_fo(nuvk), self.prior_kt(nuvk), self.prior_m0(nuvk), self.prior_nt(nuvk)
-        val_prior = frac_func((fo, kt), m0, oimag)/nt
+        val_prior = jnp.where(nt>0, frac_func((fo, kt), m0, oimag)/nt, 0.0) # cover the case where one type is missing after training !
         return val_prior
 
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None))
