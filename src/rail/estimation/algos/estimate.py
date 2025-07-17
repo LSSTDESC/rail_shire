@@ -96,7 +96,7 @@ class ShireEstimator(CatEstimator):
         ),
         wlmax=Param(
             float,
-            15000.,
+            25000.,
             msg='wlmax (float): upper bound of wavelength grid for filters interpolation'
         ),
         dwl=Param(
@@ -591,9 +591,10 @@ class ShireEstimator(CatEstimator):
     def _prior(self, oimags, redz, nuvk):
         #corrmags = jnp.where(oimags<self.modeldict['mo'], self.modeldict['mo'], oimags)
         vals = self.vmap_prior_z(oimags, redz, nuvk)
+        _sums = jnp.nansum(vals, axis=1)
         #valmax = jnp.nanmax(vals, axis=1)
-        #norm = trapezoid(vals, x=redz, axis=0)
-        return vals #/norm
+        norm = trapezoid(_sums, x=redz, axis=0)
+        return vals/norm
 
 
     def _estimate_pdf(self, templ_tuples, observed_colors, observed_noise, observed_imags):

@@ -155,7 +155,7 @@ class ShireInformer(CatInformer):
         ),
         wlmax=Param(
             float,
-            15000.,
+            25000.,
             msg='wlmax (float): upper bound of wavelength grid for filters interpolation'
         ),
         dwl=Param(
