@@ -585,13 +585,16 @@ class ShireEstimator(CatEstimator):
 
     vmap_prior_gals = vmap(_val_prior, in_axes=(None, 0, None, None))
     vmap_prior_nuvk = vmap(vmap_prior_gals, in_axes=(None, None, None, 0))
+    _vmap_for_prior_norm = vmap(vmap_prior_nuvk, in_axes=(None, None, 0, None))
+    
+    
     vmap_prior_z = vmap(vmap_prior_nuvk, in_axes=(None, None, 0, 0))
 
     @partial(jit, static_argnums=0)
     def _prior(self, oimags, redz, nuvk):
         #corrmags = jnp.where(oimags<self.modeldict['mo'], self.modeldict['mo'], oimags)
         vals = self.vmap_prior_z(oimags, redz, nuvk)
-        _vals_for_norm = vmap(self.vmap_prior_nuvk, in_axes=(None, None, 0, None))(oimags, redz, jnp.array([1.0, 3.0, 5.0]))
+        _vals_for_norm = self._vmap_for_prior_norm(oimags, redz, jnp.array([1.0, 3.0, 5.0]))
         _sums = jnp.nansum(_vals_for_norm, axis=1)
         #valmax = jnp.nanmax(vals, axis=1)
         norm = trapezoid(_sums, x=redz, axis=0)
