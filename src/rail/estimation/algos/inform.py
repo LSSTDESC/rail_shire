@@ -308,7 +308,7 @@ class ShireInformer(CatInformer):
             training_data[self.config["redshift_col"]]
         )
 
-        self.pzs = np.histogram_bin_edges(self.szs, bins='auto')
+        self.pzs = jnp.histogram_bin_edges(self.szs, bins=100) #'auto')
 
     def _load_filters(self):
         wls = jnp.arange(
