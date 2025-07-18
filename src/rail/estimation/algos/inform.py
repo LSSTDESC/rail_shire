@@ -982,7 +982,7 @@ class ShireInformer(CatInformer):
             plt.show()
         return fig_list
 
-    def hist_colrs_templates(self, hue='Dataset', trainlabel='Colours/redshift'):
+    def hist_colrs_templates(self, hue='Dataset', trainlabel='Training data'):
         self._load_training()
         all_tsels_df = self._nuvk_classif()
         train_df = pd.DataFrame(
@@ -1032,7 +1032,7 @@ class ShireInformer(CatInformer):
             labels = [t.get_text()+' templates' for t in old_legend.get_texts()]
             title = old_legend.get_title().get_text()
             
-            a.legend(handles=[train_patch]+handles, labels=['Training data']+labels, title=title, loc='best')
+            a.legend(handles=[train_patch]+handles, labels=[trainlabel]+labels, title=title, loc='best')
             fig_list.append(f)
             
             plt.show()
