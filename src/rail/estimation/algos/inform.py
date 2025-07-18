@@ -930,7 +930,7 @@ class ShireInformer(CatInformer):
         self.finalize()
         return self.get_handle("model"), self.get_handle("templates")
 
-    def plot_colrs_templates(self, hue='CAT_NUVK', style='Dataset', order=None):
+    def plot_colrs_templates(self, hue='CAT_NUVK', style='Dataset', order=None, trainlabel='Colours/redshift'):
         if order is None and hue=='CAT_NUVK':
             order=self.refcategs
 
@@ -943,7 +943,7 @@ class ShireInformer(CatInformer):
             columns=self.color_names+[self.config.ref_band, self.config.redshift_col]
         )
 
-        leg1 = mlines.Line2D([], [], color='gray', label='LSST sim', marker='o', markersize=6, alpha=0.7, ls='')
+        leg1 = mlines.Line2D([], [], color='gray', label=trainlabel, marker='o', markersize=6, alpha=0.7, ls='')
         fig_list = []
         for ix, (c1, c2) in enumerate(zip(self.color_names[:-1], self.color_names[1:])):
             f,a = plt.subplots(1,1, constrained_layout=True)
@@ -977,12 +977,12 @@ class ShireInformer(CatInformer):
             a.grid()
 
             handles, labels = a.get_legend_handles_labels()
-            a.legend(handles=[handles[0]]+[leg1]+handles, labels=['Training set']+['LSST sim']+labels)
+            a.legend(handles=[handles[0]]+[leg1]+handles, labels=['Training set']+[trainlabel]+labels)
             fig_list.append(f)
             plt.show()
         return fig_list
 
-    def hist_colrs_templates(self, hue='Dataset'):
+    def hist_colrs_templates(self, hue='Dataset', trainlabel='Training data'):
         self._load_training()
         all_tsels_df = self._nuvk_classif()
         train_df = pd.DataFrame(
@@ -992,7 +992,7 @@ class ShireInformer(CatInformer):
             columns=self.color_names+[self.config.ref_band, self.config.redshift_col]
         )
 
-        train_patch = mpatches.Patch(edgecolor='k', facecolor='grey', label='LSST sim', alpha=0.7)
+        train_patch = mpatches.Patch(edgecolor='k', facecolor='grey', label=trainlabel, alpha=0.7)
 
         list_edges = []
         fig_list = []
@@ -1032,7 +1032,7 @@ class ShireInformer(CatInformer):
             labels = [t.get_text()+' templates' for t in old_legend.get_texts()]
             title = old_legend.get_title().get_text()
             
-            a.legend(handles=[train_patch]+handles, labels=['Training data']+labels, title=title, loc='best')
+            a.legend(handles=[train_patch]+handles, labels=[trainlabel]+labels, title=title, loc='best')
             fig_list.append(f)
             
             plt.show()
