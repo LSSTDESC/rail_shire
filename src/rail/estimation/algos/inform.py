@@ -1206,7 +1206,7 @@ class ShireInformer(CatInformer):
                 plt.show()
         return fig_list
 
-    def plot_templ_seds(self, redshifts=None):
+    def plot_templ_seds(self, redshifts=None, wlmin=None, wlmax=None):
         if redshifts is None:
             redshifts = jnp.linspace(self.config.zmin, self.config.zmax, 6, endpoint=True)
         elif isinstance(redshifts, (int, float, jnp.float32, jnp.float64, np.float32, np.float64)):
@@ -1215,6 +1215,12 @@ class ShireInformer(CatInformer):
             redshifts = jnp.array(redshifts)
         else:
             assert isinstance(redshifts, jnp.ndarray), "Please specify the redshift as a single value or a list, tuple, numpy array or jax array of values."
+
+        if wlmin is None:
+            wlmin=self.config.wlmin
+        if wlmax is None:
+            wlmax=self.config.wlmax+self.config.dwl
+
         wls, transm_arr = self._load_filters()
         templ_pars = jnp.array(self.templates_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
         templ_zref = jnp.array(self.templates_df[self.config.redshift_col])
@@ -1274,7 +1280,7 @@ class ShireInformer(CatInformer):
             aa.set_ylabel(r'Filter transmission / effective area [- / $\mathrm{m^2}$]')
             #a.set_xscale('log')
             a.set_yscale('log')
-            a.set_xlim(self.config.wlmin, self.config.wlmax+self.config.dwl)
+            a.set_xlim(wlmin, wlmax)
             a.grid()
             _legends = []
             for _cat, _colrs in clrdict.items():
@@ -1288,7 +1294,7 @@ class ShireInformer(CatInformer):
             plt.show()
         return figlist
 
-    def plot_templ_seds_d4000(self, redshifts=None):
+    def plot_templ_seds_d4000(self, redshifts=None, wlmin=None, wlmax=None):
         if redshifts is None:
             redshifts = jnp.linspace(self.config.zmin, self.config.zmax, 6, endpoint=True)
         elif isinstance(redshifts, (int, float, jnp.float32, jnp.float64, np.float32, np.float64)):
@@ -1297,6 +1303,12 @@ class ShireInformer(CatInformer):
             redshifts = jnp.array(redshifts)
         else:
             assert isinstance(redshifts, jnp.ndarray), "Please specify the redshift as a single value or a list, tuple, numpy array or jax array of values."
+        
+        if wlmin is None:
+            wlmin=self.config.wlmin
+        if wlmax is None:
+            wlmax=self.config.wlmax+self.config.dwl
+
         wls, transm_arr = self._load_filters()
         templ_pars = jnp.array(self.templates_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
         templ_zref = jnp.array(self.templates_df[self.config.redshift_col])
@@ -1354,7 +1366,7 @@ class ShireInformer(CatInformer):
             aa.set_ylabel(r'Filter transmission / effective area [- / $\mathrm{m^2}$]')
             #a.set_xscale('log')
             a.set_yscale('log')
-            a.set_xlim(self.config.wlmin, self.config.wlmax+self.config.dwl)
+            a.set_xlim(wlmin, wlmax)
             a.grid()
             a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
             secax = a.secondary_xaxis('top', functions=(lambda wl: wl/(1+z), lambda wl: wl*(1+z)))
