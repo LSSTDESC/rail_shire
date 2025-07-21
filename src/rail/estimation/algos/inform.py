@@ -1206,7 +1206,7 @@ class ShireInformer(CatInformer):
                 plt.show()
         return fig_list
 
-    def plot_templ_seds(self, redshifts=None, wlmin=None, wlmax=None):
+    def plot_templ_seds(self, redshifts=None, wlmin=None, wlmax=None, ymin=None, ymax=None):
         if redshifts is None:
             redshifts = jnp.linspace(self.config.zmin, self.config.zmax, 6, endpoint=True)
         elif isinstance(redshifts, (int, float, jnp.float32, jnp.float64, np.float32, np.float64)):
@@ -1281,6 +1281,8 @@ class ShireInformer(CatInformer):
             #a.set_xscale('log')
             a.set_yscale('log')
             a.set_xlim(wlmin, wlmax)
+            if ymin is not None and ymax is not None:
+                a.set_ylim(ymin, ymax)
             a.grid()
             _legends = []
             for _cat, _colrs in clrdict.items():
@@ -1294,7 +1296,7 @@ class ShireInformer(CatInformer):
             plt.show()
         return figlist
 
-    def plot_templ_seds_d4000(self, redshifts=None, wlmin=None, wlmax=None):
+    def plot_templ_seds_d4000(self, redshifts=None, wlmin=None, wlmax=None, ymin=None, ymax=None):
         if redshifts is None:
             redshifts = jnp.linspace(self.config.zmin, self.config.zmax, 6, endpoint=True)
         elif isinstance(redshifts, (int, float, jnp.float32, jnp.float64, np.float32, np.float64)):
@@ -1366,6 +1368,9 @@ class ShireInformer(CatInformer):
             aa.set_ylabel(r'Filter transmission / effective area [- / $\mathrm{m^2}$]')
             #a.set_xscale('log')
             a.set_yscale('log')
+            a.set_xlim(wlmin, wlmax)
+            if ymin is not None and ymax is not None:
+                a.set_ylim(ymin, ymax)
             a.set_xlim(wlmin, wlmax)
             a.grid()
             a.set_title(r'SED templates at $z=$'+f"{z:.2f}")
