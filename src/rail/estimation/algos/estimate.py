@@ -103,7 +103,8 @@ class ShireEstimator(CatEstimator):
             float,
             100.,
             msg='dwl (float): step of wavelength grid for filters interpolation'
-        )
+        ),
+        prior_type=Param(str, "NUVK", msg="Quantity to classify galaxies in broad types; must be one of 'NUVK' or 'BPT'.")
     )
 
     def __init__(self, args, **kwargs):
@@ -133,6 +134,7 @@ class ShireEstimator(CatEstimator):
         self.zgrid=None
         self.avgrid=None
         self.templates=None
+        self.prior_type=self.config.prior_type
         self.e0_pars = None
         self.sbcd_pars = None
         # self.sbc_pars = None

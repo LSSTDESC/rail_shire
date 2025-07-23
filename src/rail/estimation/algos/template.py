@@ -230,7 +230,7 @@ def mean_mags(params, wls, filt_trans_arr, z_obs, ssp_data):
     :rtype: _type_
     """
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
 
     mags_predictions = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
     # mags_predictions = tree_map(
@@ -356,14 +356,14 @@ def templ_mags(params, wls, filt_trans_arr, z_obs, av, ssp_data):
     """
     _pars = params.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(_pars, z_obs, ssp_data)
+    ssp_wave, sed_restf, sed_attenuated = ssp_spectrum_fromparam(_pars, z_obs, ssp_data)
     _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
     _nuvk = jnp.array(
         [
-            calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
-            calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
+            calc_rest_mag(ssp_wave, sed_restf, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(ssp_wave, sed_restf, NIR_filt.wavelength, NIR_filt.transmission)
         ]
-    )
+    ) #NUV-K shall not include dust attenuation
 
     mags_predictions = jnp.concatenate((_mags, _nuvk))
 
@@ -666,14 +666,14 @@ def templ_mags_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data):
     """
     _pars = params.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(_pars, z_ref, ssp_data)
+    ssp_wave, sed_restf, sed_attenuated = ssp_spectrum_fromparam(_pars, z_ref, ssp_data)
     _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
     _nuvk = jnp.array(
         [
-            calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
-            calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
+            calc_rest_mag(ssp_wave, sed_restf, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(ssp_wave, sed_restf, NIR_filt.wavelength, NIR_filt.transmission)
         ]
-    )
+    ) # NUV-K shall not include dust attenuation
 
     mags_predictions = jnp.concatenate((_mags, _nuvk))
 
@@ -1062,7 +1062,7 @@ vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, Non
 def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
-    t_nuvk = v_nuvk_zo_dusty(templ_pars, wls, zobs, ssp_data)
+    t_nuvk = v_nuvk_zo(templ_pars, wls, zobs, ssp_data) #v_nuvk_zo_dusty(templ_pars, wls, zobs, ssp_data) -- NUV-K for prior shall not include dust attenuation
     t_d4000n = v_d4000n_zo_dusty(templ_pars, wls, zobs, ssp_data)
     return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d4000n))
 
@@ -1090,7 +1090,7 @@ vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo_leg, in_axes=(0, None,
 def colrs_bptrews_templ_zo_dusty_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_dusty_leg(templ_pars, zref, ssp_data)
     t_colors = vmap_cols_zo_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data)
-    t_nuvk = calc_nuvk_dusty(templ_pars, wls, zref, ssp_data)
+    t_nuvk = calc_nuvk(templ_pars, wls, zref, ssp_data) #calc_nuvk_dusty(templ_pars, wls, zref, ssp_data) -- NUV-K for prior shall not include dust attenuation
     t_d4000n = calc_d4000n_dusty(templ_pars, wls, zref, ssp_data)
     return jnp.column_stack(
         (
