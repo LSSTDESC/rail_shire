@@ -734,8 +734,6 @@ class ShireInformer(CatInformer):
         Xtest = np.clip(test_df[self.color_names+[self.config.redshift_col]], -3.4e+38, 3.4e+38)
         ytest = classifier.predict(Xtest)
         #yvals, ycounts = np.unique(ytest, return_counts=True)
-        self.refcategs = ['NC', 'Star-forming', 'Composite', 'AGN']
-        self.ntyp = len(self.refcategs)
 
         test_df['CAT_NII'] = ytest
         self.besttypes = [np.argwhere(self.refcategs==cat)[0][0] for cat in ytest]

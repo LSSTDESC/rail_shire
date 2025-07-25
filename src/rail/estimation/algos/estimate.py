@@ -615,8 +615,9 @@ class ShireEstimator(CatEstimator):
             def _posterior(sedcols, ocols, onoise, oimags, redz, nuvks):
                 _nllik = vmap_neg_log_likelihood(sedcols, ocols, onoise)
                 _pz = jnp.exp(-0.5 * _nllik)
+                _n = trapezoid(_pz, x=self.zgrid, axis=0)
                 _prior = self._prior(oimags, redz, nuvks)
-                _vals = _pz*_prior
+                _vals = (_pz/_n)*_prior
                 return jnp.nanmax(_vals, axis=1)
                 #return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks[0][0]) # prior is computed for the template without dust
             
