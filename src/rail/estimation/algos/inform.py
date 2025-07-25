@@ -48,10 +48,10 @@ from .template import (
     v_d4000n_dusty,
     #calc_d4000n,
     calc_d4000n_dusty,
-    #v_nuvk,
-    v_nuvk_dusty,
-    #calc_nuvk,
-    calc_nuvk_dusty,
+    v_nuvk,
+    #v_nuvk_dusty,
+    calc_nuvk,
+    #calc_nuvk_dusty,
     mean_spectrum,
     vmap_calc_eqw
 )
@@ -1313,13 +1313,13 @@ class ShireInformer(CatInformer):
                 vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
-            nuvk = v_nuvk_dusty(templ_pars, wls, redshifts, sspdata)
+            nuvk = v_nuvk(templ_pars, wls, redshifts, sspdata)
             _selnorm = jnp.logical_and(wls>3950, wls<4000)
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
             _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
-            _vnuvk = vmap(calc_nuvk_dusty, in_axes=(0, None, 0, None))
+            _vnuvk = vmap(calc_nuvk, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
                 0.001
