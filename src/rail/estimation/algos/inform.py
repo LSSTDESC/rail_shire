@@ -428,6 +428,19 @@ class ShireInformer(CatInformer):
 
 
     @partial(jit, static_argnums=0) #, 2, 3))
+    def _frac_likelihood_alaBPZ(self, frac_params, mags): #, btyp, idxbtyp):
+        _foi = frac_params[:self.ntyp]
+        _kti = frac_params[self.ntyp:]
+        X = (_foi[:-1], _kti[:-1]) #jnp.vstack((_foi, _kti)).T
+        _probs = vmap_frac(X, self.m0[:-1], mags)
+        _probs_last = 1.0 - jnp.nansum(_probs, axis=0)
+        probs = jnp.column_stack((_probs, jnp.expand_dims(_probs_last, axis=0)))
+        probsel = probs[self.besttypes, jnp.arange(len(self.besttypes))]
+        likelihood = jnp.where(probsel>0, -jnp.log(probsel), 0)
+        return jnp.nansum(likelihood)
+
+
+    @partial(jit, static_argnums=0) #, 2, 3))
     def _frac_likelihood_combined(self, frac_params, mags): #, btyp, idxbtyp):
         _foi = frac_params[:self.ntyp]
         _kti = frac_params[self.ntyp:2*self.ntyp]
@@ -604,6 +617,8 @@ class ShireInformer(CatInformer):
         fracnorm = jnp.sum(tmpfo)
         self.fo_arr = tmpfo/fracnorm
         self.kt_arr = frac_results[self.ntyp:]
+        for i, (ifo, ikt) in enumerate(zip(self.fo_arr, self.kt_arr)):
+            print(f"best fit f0, kt for type {i}: {ifo, ikt}")
 
 
     def _find_dndz_params(self):
@@ -705,11 +720,11 @@ class ShireInformer(CatInformer):
         #self._load_filters()
         all_tsels_df = self._nuvk_classif()
         classifier = RandomForestClassifier() # use defaults settings for now
-        X = np.clip(all_tsels_df[self.color_names+[self.config.redshift_col]], -3.4e+38, 3.4e+38)
+        X = np.clip(all_tsels_df[self.color_names], -3.4e+38, 3.4e+38) #+[self.config.redshift_col]
         y = np.array(all_tsels_df['CAT_NUVK'])
         classifier.fit(X, y)
 
-        Xtest = np.clip(test_df[self.color_names+[self.config.redshift_col]], -3.4e+38, 3.4e+38)
+        Xtest = np.clip(test_df[self.color_names], -3.4e+38, 3.4e+38) #+[self.config.redshift_col]
         ytest = classifier.predict(Xtest)
         #yvals, ycounts = np.unique(ytest, return_counts=True)
 
@@ -727,21 +742,21 @@ class ShireInformer(CatInformer):
     def class_bpt(self, test_df):
         all_tsels_df = self._bpt_classif()
         classifier = RandomForestClassifier() # use defaults settings for now
-        X = np.clip(all_tsels_df[self.color_names+[self.config.redshift_col]], -3.4e+38, 3.4e+38)
+        X = np.clip(all_tsels_df[self.color_names], -3.4e+38, 3.4e+38) #+[self.config.redshift_col]
         y = np.array(all_tsels_df['CAT_NII'])
         classifier.fit(X, y)
 
-        Xtest = np.clip(test_df[self.color_names+[self.config.redshift_col]], -3.4e+38, 3.4e+38)
+        Xtest = np.clip(test_df[self.color_names], -3.4e+38, 3.4e+38) #+[self.config.redshift_col]
         ytest = classifier.predict(Xtest)
         #yvals, ycounts = np.unique(ytest, return_counts=True)
 
         test_df['CAT_NII'] = ytest
         self.besttypes = [np.argwhere(self.refcategs==cat)[0][0] for cat in ytest]
 
-        #z0list, alflist, kmlist = self._fit_prior()
+        z0list, alflist, kmlist = self._fit_prior()
 
-        z0list, alflist, kmlist = self._find_dndz_params()
-        self._find_fractions()
+        #z0list, alflist, kmlist = self._find_dndz_params()
+        #self._find_fractions()
 
         return z0list, alflist, kmlist #jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist)
 

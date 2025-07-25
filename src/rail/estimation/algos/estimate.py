@@ -1,6 +1,7 @@
 import os
 import jax
 from functools import partial
+import numpy as np
 from jax import numpy as jnp
 from jax.tree_util import tree_map
 from jax import jit, vmap
@@ -134,7 +135,9 @@ class ShireEstimator(CatEstimator):
         self.zgrid=None
         self.avgrid=None
         self.templates=None
-        self.prior_type=self.config.prior_type
+        self.prior_type = self.config.prior_type
+        self.refcategs = np.array(["E_S0", "Sbc/Scd", "Irr"]) if "nuvk" in self.config.prior_type.lower() else np.array(["NC", "Star-forming", "Composite", "AGN"])
+        self.ntyp = len(self.refcategs)
         self.e0_pars = None
         self.sbcd_pars = None
         # self.sbc_pars = None
@@ -574,6 +577,20 @@ class ShireEstimator(CatEstimator):
         val_prior = jnp.where(nt>0, frac_func((fo, kt), m0, oimag)/nt, 0.0) # cover the case where one type is missing after training !
         return val_prior
 
+
+    @partial(jit, static_argnums=0)
+    def _val_frac_prior_alaBPZ(self, oimag, nuvk):
+        fo, kt, m0, nt, mod = self.prior_fo(nuvk), self.prior_kt(nuvk), self.prior_m0(nuvk), self.prior_nt(nuvk), self.prior_mod(nuvk)
+        _val_frac = frac_func((fo, kt), m0, oimag)
+        _sum_to_one = 1-\
+            (
+                frac_func((self.e0_pars.fo, self.e0_pars.kt), self.e0_pars.m0, oimag) + \
+                frac_func((self.sbcd_pars.fo, self.sbcd_pars.kt), self.sbcd_pars.m0, oimag)
+            )
+        _val_alaBPZ = jnp.where(mod<self.ntyp-1, _val_frac, _sum_to_one)
+        val_frac = jnp.where(nt>0, _val_alaBPZ/nt, 0.0) # cover the case where one type is missing after training !
+        return val_frac
+
     vmap_frac_gals = vmap(_val_frac_prior, in_axes=(None, 0, None))
     vmap_frac_nuvk = vmap(vmap_frac_gals, in_axes=(None, None, 0))
 
@@ -615,9 +632,9 @@ class ShireEstimator(CatEstimator):
             def _posterior(sedcols, ocols, onoise, oimags, redz, nuvks):
                 _nllik = vmap_neg_log_likelihood(sedcols, ocols, onoise)
                 _pz = jnp.exp(-0.5 * _nllik)
-                _n = trapezoid(_pz, x=self.zgrid, axis=0)
+                #_n = trapezoid(_pz, x=self.zgrid, axis=0)
                 _prior = self._prior(oimags, redz, nuvks)
-                _vals = (_pz/_n)*_prior
+                _vals = _pz*_prior #/_n
                 return jnp.nanmax(_vals, axis=1)
                 #return likelihood(sedcols, ocols, onoise) * self._prior(oimags, redz, nuvks[0][0]) # prior is computed for the template without dust
             
