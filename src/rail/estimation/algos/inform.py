@@ -13,7 +13,7 @@ import scipy.optimize as sciop
 
 import pandas as pd
 #import qp
-from tqdm import tqdm
+#from tqdm import tqdm
 import tables_io
 from sklearn.ensemble import RandomForestClassifier
 from ceci.config import StageParameter as Param
@@ -29,12 +29,14 @@ import matplotlib as mpl
 import seaborn as sns
 
 from .io_utils import load_ssp, istuple, SHIREDATALOC
-from .analysis import _DUMMY_PARS, lsunPerHz_to_fnu_noU, C_KMS, convert_flux_toobsframe #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
+from .analysis import _DUMMY_PARS, PARS_DF, lsunPerHz_to_fnu_noU, C_KMS, convert_flux_toobsframe #, PARAMS_MAX, PARAMS_MIN, INIT_PARAMS
 from .template import (
-    vmap_cols_zo,
-    vmap_cols_zo_leg,
-    colrs_bptrews_templ_zo_dusty,
-    colrs_bptrews_templ_zo_dusty_leg,
+    #vmap_cols_zo,
+    #vmap_cols_zo_leg,
+    make_sps_templates,
+    make_legacy_templates,
+    #colrs_bptrews_templ_zo_dusty,
+    #colrs_bptrews_templ_zo_dusty_leg,
     lim_HII_comp,
     lim_seyf_liner,
     Ka03_nii,
@@ -43,18 +45,21 @@ from .template import (
     Ke01_sii,
     Ke06_oi,
     Ke06_sii,
-    vmap_mean_spectrum,
-    #v_d4000n,
-    v_d4000n_dusty,
-    #calc_d4000n,
-    calc_d4000n_dusty,
+    vmap_mean_spectrum_nodust,
+    v_d4000n,
+    #v_d4000n_dusty,
+    calc_d4000n,
+    #calc_d4000n_dusty,
     v_nuvk,
     #v_nuvk_dusty,
     calc_nuvk,
     #calc_nuvk_dusty,
-    mean_spectrum,
-    vmap_calc_eqw
+    mean_spectrum_nodust,
+    vmap_calc_eqw,
+    vmap_bpt_rews,
+    vmap_bpt_rews_leg,
 )
+from .galaxy import val_neg_log_likelihood, vmap_mags_to_i_and_colors
 from .filter import get_sedpy
 #from .cosmology import prior_mod
 
@@ -104,6 +109,14 @@ def vmap_frac(X, m0, m):
     _vals = _vmap_frac(X, m0, m)
     _sum = jnp.nansum(_vals, axis=0)
     return _vals/_sum
+
+vmap_neg_llik_ = vmap(
+    vmap(
+        val_neg_log_likelihood,
+        in_axes=(0, None, None),  # ... and all dust attenuations
+    ),
+    in_axes=(0, None, None),  # ... and for all redshifts
+)
 
 class ShireInformer(CatInformer):
     name = "ShireInformer"
@@ -200,9 +213,16 @@ class ShireInformer(CatInformer):
         self.kt_arr = None
         self.typmask = None
         self.mags = None
+        self.mag_errs = None
         self.refmags = None
         self.szs = None
         self.pzs = None
+        self.avs = jnp.linspace(
+            PARS_DF.loc["AV", "MIN"],
+            PARS_DF.loc["AV", "MAX"],
+            num=3,
+            endpoint=True
+        )
         self.prior_type = self.config.prior_type
         self.refcategs = np.array(["E_S0", "Sbc/Scd", "Irr"]) if "nuvk" in self.config.prior_type.lower() else np.array(["NC", "Star-forming", "Composite", "AGN"])
         self.ntyp = len(self.refcategs)
@@ -301,6 +321,9 @@ class ShireInformer(CatInformer):
         self.mags = jnp.column_stack(
             [training_data[f"mag_{_n}"] for _n in self.filters_names]
         )
+        self.mag_errs = jnp.column_stack(
+            [training_data[f"mag_err_{_n}"] for _n in self.filters_names]
+        )
         self.refmags = jnp.array(
             training_data[self.config.ref_band]
         )
@@ -309,7 +332,7 @@ class ShireInformer(CatInformer):
             training_data[self.config["redshift_col"]]
         )
 
-        self.pzs = jnp.histogram_bin_edges(self.szs, bins=100) #'auto')
+        self.pzs = jnp.histogram_bin_edges(self.szs, bins=50) #'auto')
 
     def _load_filters(self):
         wls = jnp.arange(
@@ -361,32 +384,37 @@ class ShireInformer(CatInformer):
         templ_zref = jnp.array(templs_df[self.config.redshift_col])
 
         if "sps" in self.config.templ_type.lower():
-            templ_tupl = [tuple(_pars) for _pars in templ_pars_arr]
-            templ_tupl_sps = tree_map(
-                lambda partup: colrs_bptrews_templ_zo_dusty(
-                    jnp.array(partup),
-                    fwls,
-                    pzs,
-                    ftransm,
-                    sspdata
-                ),
-                templ_tupl,
-                is_leaf=istuple
+            templ_tupl_sps = make_sps_templates(
+                templ_pars_arr,
+                fwls,
+                ftransm,
+                pzs,
+                self.avs,
+                sspdata
             )
+            templ_rews = vmap_bpt_rews(
+                templ_pars_arr,
+                pzs,
+                sspdata
+            )
+            templ_d4k = v_d4000n(templ_pars_arr, fwls, pzs, sspdata)
         else:
-            templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(templ_pars_arr, templ_zref, strict=True)]
-            templ_tupl_sps = tree_map(
-                lambda partup: colrs_bptrews_templ_zo_dusty_leg(
-                    jnp.array(partup[:-1]),
-                    fwls,
-                    pzs,
-                    partup[-1],
-                    ftransm,
-                    sspdata
-                ),
-                templ_tupl,
-                is_leaf=istuple
+            templ_tupl_sps = make_legacy_templates(
+                templ_pars_arr,
+                templ_zref,
+                fwls,
+                ftransm,
+                pzs,
+                self.avs,
+                sspdata
             )
+            templ_rews = vmap_bpt_rews_leg(
+                templ_pars_arr,
+                templ_zref,
+                sspdata
+            )
+            _vd4k = vmap(calc_d4000n, in_axes=(0, None, None, None))
+            templ_d4k = _vd4k(templ_pars_arr, fwls, templ_zref, sspdata)
 
         filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
         color_names = [f"{n1}-{n2}" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
@@ -401,13 +429,17 @@ class ShireInformer(CatInformer):
         ]
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_df.iterrows()):
-            _colrrews = templ_tupl_sps[it]
-            _df = pd.DataFrame(columns=color_names+lines_names+['NUVK', 'D4000n'], data=_colrrews)
-            _df['z_p'] = pzs
-            _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
-            _df['name'] = np.full(pzs.shape, tname)
-            _df[self.config.redshift_col] = np.full(pzs.shape, row[self.config.redshift_col])
-            templs_as_dict.update({f"{tname}": _df})
+            _colrs, _rews, _d4k = templ_tupl_sps[it], templ_rews[it, :], templ_d4k[it, :]
+            _dflist = []
+            for iav, av in enumerate(self.avs):
+                _df = pd.DataFrame(columns=color_names+['NUVK', 'D4000n']+lines_names, data=np.column_stack((_colrs[:, iav], _d4k, _rews)))
+                _df['z_p'] = pzs
+                _df['Av'] = np.full(pzs.shape, av)
+                _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
+                _df['name'] = np.full(pzs.shape, tname)
+                _df[self.config.redshift_col] = np.full(pzs.shape, row[self.config.redshift_col])
+                _dflist.append(_df)
+            templs_as_dict.update({f"{tname}": pd.concat(_dflist, ignore_index=True)})
         all_templs_df = pd.concat(
             [_df for _, _df in templs_as_dict.items()],
             ignore_index=True
@@ -730,6 +762,7 @@ class ShireInformer(CatInformer):
 
         test_df['CAT_NUVK'] = ytest
         self.besttypes = [np.argwhere(self.refcategs==cat)[0][0] for cat in ytest]
+        self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NUVK'] == _typ) for _typ in self.refcategs ])
 
         z0list, alflist, kmlist = self._fit_prior()
 
@@ -752,6 +785,7 @@ class ShireInformer(CatInformer):
 
         test_df['CAT_NII'] = ytest
         self.besttypes = [np.argwhere(self.refcategs==cat)[0][0] for cat in ytest]
+        self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NII'] == _typ) for _typ in self.refcategs ])
 
         z0list, alflist, kmlist = self._fit_prior()
 
@@ -760,6 +794,33 @@ class ShireInformer(CatInformer):
 
         return z0list, alflist, kmlist #jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist)
 
+    @jit
+    def _min_llik(self, sps_temp, ocols, oerrs, ozs):
+        neglog_lik = vmap_neg_llik_(sps_temp, ocols, oerrs)
+        _min_nllik_dust = jnp.nanmin(neglog_lik, axis=1)
+        _interp_at_zs = jnp.interp(ozs, self.pzs, _min_nllik_dust)
+        return _interp_at_zs
+
+    vmap_min_llik_gals = vmap(
+        _min_llik,
+        in_axes=(None, None, 0, 0, 0)
+    )
+
+    def _find_best_templ(self, templ_tuples):
+        id_i_band = self.config.bands.index(self.config.ref_band)
+        _, ab_colors, ab_cols_errs = (
+            vmap_mags_to_i_and_colors(self.mags, self.mag_errs, id_i_band)
+        )
+        nloglik_arr = tree_map(
+            lambda sed_tupl: self.vmap_min_llik_gals(sed_tupl[0], ab_colors, ab_cols_errs, self.szs),
+            templ_tuples,
+            is_leaf=istuple,
+        )
+
+        nloglik_arr = jnp.array(nloglik_arr)
+        _best_templ_idx = jnp.nanargmin(nloglik_arr, axis=0)
+
+        return np.sort(np.unique(_best_templ_idx))
 
     def run(self):
         wls, transm_arr = self._load_filters()
@@ -802,34 +863,35 @@ class ShireInformer(CatInformer):
                     )
                 )
             )
+
             if "sps" in self.config.templ_type.lower():
-                templ_tupl = [tuple(_pars) for _pars in pars_arr]
-                templ_tupl_sps = tree_map(
-                    lambda partup: vmap_cols_zo(
-                        jnp.array(partup),
-                        wls,
-                        self.pzs,
-                        transm_arr,
-                        ssp_data
-                    ),
-                    templ_tupl,
-                    is_leaf=istuple
+                #templ_tupl = [tuple(_pars) for _pars in pars_arr]
+                templ_tupl_sps = make_sps_templates(
+                    pars_arr,
+                    wls,
+                    transm_arr,
+                    self.pzs,
+                    self.avs,
+                    ssp_data
                 )
             else:
-                templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(pars_arr, templ_zref, strict=True)]
-                templ_tupl_sps = tree_map(
-                    lambda partup: vmap_cols_zo_leg(
-                        jnp.array(partup[:-1]),
-                        wls,
-                        self.pzs,
-                        partup[-1],
-                        transm_arr,
-                        ssp_data
-                    ),
-                    templ_tupl,
-                    is_leaf=istuple
+                #templ_tupl = [tuple(_pars)+tuple([_z]) for _pars, _z in zip(pars_arr, templ_zref, strict=True)]
+                templ_tupl_sps = make_legacy_templates(
+                    pars_arr,
+                    templ_zref,
+                    wls,
+                    transm_arr,
+                    self.pzs,
+                    self.avs,
+                    ssp_data
                 )
 
+            retained_templ_idx = self._find_best_templ(templ_tupl_sps)
+            templ_score_df = templs_ref_df.iloc[retained_templ_idx]
+            templ_score_df = np.full(retained_templ_idx.shape[0], -1)
+            templ_score_df['name'] = templ_score_df.index
+            
+            '''
             templs_as_dict = {}
             for it, (tname, row) in enumerate(templs_ref_df.iterrows()):
                 _colrs = templ_tupl_sps[it]
@@ -906,7 +968,7 @@ class ShireInformer(CatInformer):
                 templs_score_df.loc[tn, 'score'] = float(msc)
                 templs_score_df.loc[tn, 'name'] = tn
             templs_score_df.sort_values('score', ascending=True, inplace=True)
-
+            '''
         tables_io.write(
             templs_score_df,
             self.config.output,
@@ -1160,7 +1222,6 @@ class ShireInformer(CatInformer):
         self._load_training()
         all_tsels_df = self._load_templates()
         all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in self.prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
-        self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NUVK'] == _typ) for _typ in _mod_names ])
         #self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NUVK'] == _typ)//self.pzs.shape[0]  for _typ in _mod_names ])
         return all_tsels_df
 
@@ -1323,7 +1384,7 @@ class ShireInformer(CatInformer):
         )
         if "sps" in self.config.templ_type.lower():
             restframe_fnus = lsunPerHz_to_fnu_noU(
-                vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
+                vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
             nuvk = v_nuvk(templ_pars, wls, redshifts, sspdata)
@@ -1331,7 +1392,7 @@ class ShireInformer(CatInformer):
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
-            _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
+            _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
             _vnuvk = vmap(calc_nuvk, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
@@ -1413,16 +1474,16 @@ class ShireInformer(CatInformer):
         )
         if "sps" in self.config.templ_type.lower():
             restframe_fnus = lsunPerHz_to_fnu_noU(
-                vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
+                vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
-            d4000n = v_d4000n_dusty(templ_pars, wls, redshifts, sspdata)
+            d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
             _selnorm = jnp.logical_and(wls>3950, wls<4000)
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
-            _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
-            _vd4k = vmap(calc_d4000n_dusty, in_axes=(0, None, 0, None))
+            _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
+            _vd4k = vmap(calc_d4000n, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
                 0.001
@@ -1507,7 +1568,7 @@ class ShireInformer(CatInformer):
         )
 
         wls = jnp.arange(3500., 7000., 0.1)
-        sed = mean_spectrum(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum(wls, pars, zref, sspdata)
+        sed = mean_spectrum_nodust(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum_nodust(wls, pars, zref, sspdata)
         eqws = vmap_calc_eqw(wls, sed, lines)
         fnu = lsunPerHz_to_fnu_noU(sed, 0.001)
 
