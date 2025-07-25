@@ -887,9 +887,9 @@ class ShireInformer(CatInformer):
                 )
 
             retained_templ_idx = self._find_best_templ(templ_tupl_sps)
-            templ_score_df = templs_ref_df.iloc[retained_templ_idx]
-            templ_score_df['score'] = np.full(retained_templ_idx.shape[0], -1)
-            templ_score_df['name'] = templ_score_df.index
+            templs_score_df = templs_ref_df.iloc[retained_templ_idx]
+            templs_score_df['score'] = np.full(retained_templ_idx.shape[0], -1)
+            templs_score_df['name'] = templs_score_df.index
             
             '''
             templs_as_dict = {}
