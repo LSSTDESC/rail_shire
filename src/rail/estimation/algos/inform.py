@@ -794,7 +794,7 @@ class ShireInformer(CatInformer):
 
         return z0list, alflist, kmlist #jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist)
 
-    @jit
+    @partial(jit, static_argnums=0)
     def _min_llik(self, sps_temp, ocols, oerrs, ozs):
         neglog_lik = vmap_neg_llik_(sps_temp, ocols, oerrs)
         _min_nllik_dust = jnp.nanmin(neglog_lik, axis=1)
