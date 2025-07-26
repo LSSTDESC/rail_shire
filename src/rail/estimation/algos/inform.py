@@ -46,18 +46,26 @@ from .template import (
     Ke06_oi,
     Ke06_sii,
     vmap_mean_spectrum_nodust,
+    vmap_mean_spectrum,
     v_d4000n,
     #v_d4000n_dusty,
     calc_d4000n,
     #calc_d4000n_dusty,
-    v_nuvk,
-    #v_nuvk_dusty,
-    calc_nuvk,
-    #calc_nuvk_dusty,
+    vmap_d4000n_pars,
+    vmap_d4000n_pars_leg,
+    #v_nuvk,
+    v_nuvk_dusty,
+    #calc_nuvk,
+    calc_nuvk_dusty,
     mean_spectrum_nodust,
+    mean_spectrum,
     vmap_calc_eqw,
-    vmap_bpt_rews,
-    vmap_bpt_rews_leg,
+    #vmap_bpt_rews,
+    #vmap_bpt_rews_leg,
+    #vmap_bpt_rews_dusty,
+    #vmap_bpt_rews_dusty_leg,
+    vmap_bpt_rews_pars,
+    vmap_bpt_rews_pars_leg,
 )
 from .galaxy import val_neg_log_likelihood, vmap_mags_to_i_and_colors
 from .filter import get_sedpy
@@ -399,12 +407,13 @@ class ShireInformer(CatInformer):
                 self.avs,
                 sspdata
             )
-            templ_rews = vmap_bpt_rews(
+            templ_rews = vmap_bpt_rews_pars(
                 templ_pars_arr,
                 pzs,
+                self.avs,
                 sspdata
             )
-            templ_d4k = v_d4000n(templ_pars_arr, fwls, pzs, sspdata)
+            templ_d4k = vmap_d4000n_pars(templ_pars_arr, fwls, pzs, self.avs, sspdata)
         else:
             templ_tupl_sps = make_legacy_templates(
                 templ_pars_arr,
@@ -415,13 +424,13 @@ class ShireInformer(CatInformer):
                 self.avs,
                 sspdata
             )
-            templ_rews = vmap_bpt_rews_leg(
+            templ_rews = vmap_bpt_rews_pars_leg(
                 templ_pars_arr,
                 templ_zref,
+                self.avs,
                 sspdata
             )
-            _vd4k = vmap(calc_d4000n, in_axes=(0, None, 0, None))
-            templ_d4k = _vd4k(templ_pars_arr, fwls, templ_zref, sspdata)
+            templ_d4k = vmap_d4000n_pars_leg(templ_pars_arr, fwls, templ_zref, self.avs, sspdata)
 
         filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
         color_names = [f"{n1}-{n2}" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
@@ -445,7 +454,7 @@ class ShireInformer(CatInformer):
                 _df = pd.DataFrame(
                     columns=color_names+['NUVK', 'D4000n']+lines_names,
                     data=np.column_stack(
-                        (_colrs[:, iav], _nuvk[:, iav], _d4k, _rews)
+                        (_colrs[:, iav], _nuvk[:, iav], _d4k[:, iav], _rews[:, iav])
                     )
                 )
                 _df['z_p'] = pzs
@@ -1417,16 +1426,16 @@ class ShireInformer(CatInformer):
         )
         if "sps" in self.config.templ_type.lower():
             restframe_fnus = lsunPerHz_to_fnu_noU(
-                vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
+                vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
-            nuvk = v_nuvk(templ_pars, wls, redshifts, sspdata)
+            nuvk = v_nuvk_dusty(templ_pars, wls, redshifts, sspdata)
             _selnorm = jnp.logical_and(wls>3950, wls<4000)
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
-            _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
-            _vnuvk = vmap(calc_nuvk, in_axes=(0, None, 0, None))
+            _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
+            _vnuvk = vmap(calc_nuvk_dusty, in_axes=(0, None, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
                 0.001
@@ -1601,7 +1610,7 @@ class ShireInformer(CatInformer):
         )
 
         wls = jnp.arange(3500., 7000., 0.1)
-        sed = mean_spectrum_nodust(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum_nodust(wls, pars, zref, sspdata)
+        sed = mean_spectrum(wls, pars, z, sspdata) if "sps" in self.config.templ_type.lower() else mean_spectrum(wls, pars, zref, sspdata)
         eqws = vmap_calc_eqw(wls, sed, lines)
         fnu = lsunPerHz_to_fnu_noU(sed, 0.001)
 
