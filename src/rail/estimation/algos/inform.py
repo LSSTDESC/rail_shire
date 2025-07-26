@@ -62,6 +62,13 @@ from .template import (
 from .galaxy import val_neg_log_likelihood, vmap_mags_to_i_and_colors
 from .filter import get_sedpy
 #from .cosmology import prior_mod
+try:
+    from jax.numpy import trapezoid
+except ImportError:
+    try:
+        from jax.scipy.integrate import trapezoid
+    except ImportError:
+        from jax.numpy import trapz as trapezoid
 
 jax.config.update("jax_enable_x64", True)
 
@@ -332,7 +339,7 @@ class ShireInformer(CatInformer):
             training_data[self.config["redshift_col"]]
         )
 
-        self.pzs = jnp.histogram_bin_edges(self.szs, bins=50) #'auto')
+        self.pzs = jnp.histogram_bin_edges(self.szs, bins=100) #'auto')
 
     def _load_filters(self):
         wls = jnp.arange(
@@ -429,7 +436,8 @@ class ShireInformer(CatInformer):
         ]
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_df.iterrows()):
-            _colrs, _rews, _d4k = templ_tupl_sps[it], templ_rews[it, :], templ_d4k[it, :]
+            _colrs, _rews, _d4k = jnp.array(templ_tupl_sps[it]), templ_rews[it, :], templ_d4k[it, :]
+            print(_colrs.shape, _rews.shape, _d4k.shape)
             _dflist = []
             for iav, av in enumerate(self.avs):
                 _df = pd.DataFrame(columns=color_names+['NUVK', 'D4000n']+lines_names, data=np.column_stack((_colrs[:, iav], _d4k, _rews)))
@@ -797,9 +805,20 @@ class ShireInformer(CatInformer):
     @partial(jit, static_argnums=0)
     def _min_llik(self, sps_temp, ocols, oerrs, ozs):
         neglog_lik = vmap_neg_llik_(sps_temp, ocols, oerrs)
-        _min_nllik_dust = jnp.nanmin(neglog_lik, axis=1)
-        _interp_at_zs = jnp.interp(ozs, self.pzs, _min_nllik_dust)
-        return _interp_at_zs
+        _lik = jnp.exp(-0.5*neglog_lik)
+        _max_lik_dust = jnp.nanmax(_lik, axis=1)
+        _ptot = trapezoid(_max_lik_dust, x=self.pzs)
+        _lik_zs = jnp.where(
+            jnp.logical_or(
+                self.pzs<0.85*ozs-0.15,
+                self.pzs>1.15*ozs+0.15
+            ),
+            0.0,
+            _max_lik_dust
+        )
+        _p_zs = trapezoid(_lik_zs, x=self.pzs)
+        #_interp_at_zs = jnp.interp(ozs, self.pzs, _min_nllik_dust)
+        return _p_zs/_ptot
 
     vmap_min_llik_gals = vmap(
         _min_llik,
@@ -890,6 +909,7 @@ class ShireInformer(CatInformer):
             templs_score_df = templs_ref_df.iloc[retained_templ_idx]
             templs_score_df['score'] = np.full(retained_templ_idx.shape[0], -1)
             templs_score_df['name'] = templs_score_df.index
+            print(templs_score_df)
             
             '''
             templs_as_dict = {}
