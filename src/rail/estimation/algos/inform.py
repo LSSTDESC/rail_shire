@@ -445,7 +445,7 @@ class ShireInformer(CatInformer):
                 _df = pd.DataFrame(
                     columns=color_names+['NUVK', 'D4000n']+lines_names,
                     data=np.column_stack(
-                        (_colrs[:, iav], _nuvk[:, iav], jnp.repeat(_d4k, _colrs.shape[0], axis=0), jnp.repeat(_rews, _colrs.shape[0], axis=0))
+                        (_colrs[:, iav], _nuvk[:, iav], _d4k, _rews)
                     )
                 )
                 _df['z_p'] = pzs
