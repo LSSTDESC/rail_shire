@@ -447,14 +447,14 @@ class ShireInformer(CatInformer):
         for it, (tname, row) in enumerate(templs_df.iterrows()):
             _colrs, _nuvk, _rews, _d4k = jnp.array(templ_tupl_sps[it][0]), jnp.array(templ_tupl_sps[it][1]), templ_rews[it], templ_d4k[it]
             if "sps" not in self.config.templ_type.lower():
-                _d4k = jnp.repeat(_d4k, _colrs.shape[0], axis=0)
+                _d4k = jnp.repeat(jnp.expand_dims(_d4k, axis=0), _colrs.shape[0], axis=0)
                 _rews = jnp.repeat(jnp.expand_dims(_rews, axis=0), _colrs.shape[0], axis=0)
             _dflist = []
             for iav, av in enumerate(self.avs):
                 _df = pd.DataFrame(
                     columns=color_names+['NUVK', 'D4000n']+lines_names,
                     data=np.column_stack(
-                        (_colrs[:, iav], _nuvk[:, iav], _d4k[:, iav], _rews[:, iav])
+                        (_colrs[:, iav], _nuvk[:, iav], _d4k[:, iav], _rews[:, iav, :])
                     )
                 )
                 _df['z_p'] = pzs
