@@ -420,7 +420,7 @@ class ShireInformer(CatInformer):
                 templ_zref,
                 sspdata
             )
-            _vd4k = vmap(calc_d4000n, in_axes=(0, None, None, None))
+            _vd4k = vmap(calc_d4000n, in_axes=(0, None, 0, None))
             templ_d4k = _vd4k(templ_pars_arr, fwls, templ_zref, sspdata)
 
         filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
@@ -436,11 +436,18 @@ class ShireInformer(CatInformer):
         ]
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_df.iterrows()):
-            _colrs, _rews, _d4k = jnp.array(templ_tupl_sps[it]), templ_rews[it, :], templ_d4k[it, :]
-            print(_colrs.shape, _rews.shape, _d4k.shape)
+            _colrs, _nuvk, _rews, _d4k = jnp.array(templ_tupl_sps[it][0]), jnp.array(templ_tupl_sps[it][1]), templ_rews[it], templ_d4k[it]
+            if "sps" not in self.config.templ_type.lower():
+                _d4k = jnp.repeat(_d4k, _colrs.shape[0], axis=0)
+                _rews = jnp.repeat(jnp.expand_dims(_rews, axis=0), _colrs.shape[0], axis=0)
             _dflist = []
             for iav, av in enumerate(self.avs):
-                _df = pd.DataFrame(columns=color_names+['NUVK', 'D4000n']+lines_names, data=np.column_stack((_colrs[:, iav], _d4k, _rews)))
+                _df = pd.DataFrame(
+                    columns=color_names+['NUVK', 'D4000n']+lines_names,
+                    data=np.column_stack(
+                        (_colrs[:, iav], _nuvk[:, iav], jnp.repeat(_d4k, _colrs.shape[0], axis=0), jnp.repeat(_rews, _colrs.shape[0], axis=0))
+                    )
+                )
                 _df['z_p'] = pzs
                 _df['Av'] = np.full(pzs.shape, av)
                 _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
@@ -840,10 +847,10 @@ class ShireInformer(CatInformer):
         _best_templ_idx = jnp.nanargmax(lik_arr, axis=0)
         
         unique, counts = np.unique(_best_templ_idx, return_counts=True)
-        _order = np.argsort(counts)
+        _order = np.flip(np.argsort(counts))
         unique, counts = unique[_order], counts[_order]
         _cumul = np.cumsum(counts)
-        _last_templ = np.argwhere(_cumul > _best_templ_idx.shape[0]//2)
+        _last_templ = min(np.argwhere(_cumul > 0.9*_best_templ_idx.shape[0])[0][0], 50)
 
         return unique[:_last_templ], counts[:_last_templ]
 
@@ -912,10 +919,10 @@ class ShireInformer(CatInformer):
                 )
 
             retained_templ_idx, counts_templ = self._find_best_templ(templ_tupl_sps)
-            templs_score_df = templs_ref_df.iloc[retained_templ_idx]
-            templs_score_df['score'] = np.full(retained_templ_idx.shape[0], -1)
+            #print(np.cumsum(counts_templ)/self.szs.shape[0])
+            templs_score_df = templs_ref_df.iloc[retained_templ_idx].copy()
+            templs_score_df['score'] = counts_templ/self.szs.shape[0]
             templs_score_df['name'] = templs_score_df.index
-            print(templs_score_df)
             
             '''
             templs_as_dict = {}
