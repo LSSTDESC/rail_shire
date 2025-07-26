@@ -830,16 +830,22 @@ class ShireInformer(CatInformer):
         _, ab_colors, ab_cols_errs = (
             vmap_mags_to_i_and_colors(self.mags, self.mag_errs, id_i_band)
         )
-        nloglik_arr = tree_map(
+        lik_arr = tree_map(
             lambda sed_tupl: self.vmap_min_llik_gals(sed_tupl[0], ab_colors, ab_cols_errs, self.szs),
             templ_tuples,
             is_leaf=istuple,
         )
 
-        nloglik_arr = jnp.array(nloglik_arr)
-        _best_templ_idx = jnp.nanargmin(nloglik_arr, axis=0)
+        lik_arr = jnp.array(lik_arr)
+        _best_templ_idx = jnp.nanargmax(lik_arr, axis=0)
+        
+        unique, counts = np.unique(_best_templ_idx, return_counts=True)
+        _order = np.argsort(counts)
+        unique, counts = unique[_order], counts[_order]
+        _cumul = np.cumsum(counts)
+        _last_templ = np.argwhere(_cumul > _best_templ_idx.shape[0]//2)
 
-        return np.sort(np.unique(_best_templ_idx))
+        return unique[:_last_templ], counts[:_last_templ]
 
     def run(self):
         wls, transm_arr = self._load_filters()
@@ -905,7 +911,7 @@ class ShireInformer(CatInformer):
                     ssp_data
                 )
 
-            retained_templ_idx = self._find_best_templ(templ_tupl_sps)
+            retained_templ_idx, counts_templ = self._find_best_templ(templ_tupl_sps)
             templs_score_df = templs_ref_df.iloc[retained_templ_idx]
             templs_score_df['score'] = np.full(retained_templ_idx.shape[0], -1)
             templs_score_df['name'] = templs_score_df.index
