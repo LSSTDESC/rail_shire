@@ -351,7 +351,7 @@ class ShireInformer(CatInformer):
         )
 
         _pzs = jnp.histogram_bin_edges(self.szs, bins=100) #'auto')
-        self.pzs = (_pzs.at[0].set(max(self.config.zmin, 0.001))).at[-1].set(self.config.zmax)
+        self.pzs = _pzs.at[0].set(max(self.config.zmin, 0.001, _pzs[0]))
 
     def _load_filters(self):
         wls = jnp.arange(
