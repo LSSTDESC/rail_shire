@@ -136,13 +136,16 @@ class ShireEstimator(CatEstimator):
         self.avgrid=None
         self.templates=None
         self.prior_type = self.config.prior_type
-        self.refcategs = np.array(["E_S0", "Sbc/Scd", "Irr"]) if "nuvk" in self.config.prior_type.lower() else np.array(["NC", "Star-forming", "Composite", "AGN"])
+        self.refcategs = np.array(["E_S0", "Sbc/Scd", "Irr"]) if "nuvk" in self.prior_type.lower() else np.array(["Star-forming", "AGN", "Composite", "NC"])
         self.ntyp = len(self.refcategs)
         self.e0_pars = None
         self.sbcd_pars = None
-        # self.sbc_pars = None
-        # self.scd_pars = None
         self.irr_pars = None
+        self.sf_pars = None
+        self.agn_pars = None
+        self.com_pars = None
+        self.nc_pars = None
+
 
     def _initialize_run(self):
         super()._initialize_run()
@@ -171,62 +174,112 @@ class ShireEstimator(CatEstimator):
     def open_model(self, **kwargs):
         CatEstimator.open_model(self, **kwargs)
         self.modeldict = self.model
-        self.e0_pars = PriorParams(
-            0,
-            "E_S0",
-            self.modeldict["fo_arr"][0],
-            self.modeldict["kt_arr"][0],
-            self.modeldict["zo_arr"][0],
-            self.modeldict["a_arr"][0],
-            self.modeldict["km_arr"][0],
-            self.modeldict["mo"][0],
-            self.modeldict["nt_array"][0],
-            (4.25, jnp.inf)
-        )
-        self.sbcd_pars = PriorParams(
-            1,
-            "Sbc",
-            self.modeldict["fo_arr"][1],
-            self.modeldict["kt_arr"][1],
-            self.modeldict["zo_arr"][1],
-            self.modeldict["a_arr"][1],
-            self.modeldict["km_arr"][1],
-            self.modeldict["mo"][1],
-            self.modeldict["nt_array"][1],
-            (1.9, 4.25)
-        )
-        # self.sbc_pars = PriorParams(
-        #     1,
-        #     "Sbc",
-        #     self.modeldict["fo_arr"][1],
-        #     self.modeldict["kt_arr"][1],
-        #     self.modeldict["zo_arr"][1],
-        #     self.modeldict["a_arr"][1],
-        #     self.modeldict["km_arr"][1],
-        #     (3.19, 4.25)
-        # )
-        # self.scd_pars = PriorParams(
-        #     2,
-        #     "Scd",
-        #     self.modeldict["fo_arr"][2],
-        #     self.modeldict["kt_arr"][2],
-        #     self.modeldict["zo_arr"][2],
-        #     self.modeldict["a_arr"][2],
-        #     self.modeldict["km_arr"][2],
-        #     (1.9, 3.19)
-        # )
-        self.irr_pars = PriorParams(
-            2,
-            "Irr",
-            self.modeldict["fo_arr"][2],
-            self.modeldict["kt_arr"][2],
-            self.modeldict["zo_arr"][2],
-            self.modeldict["a_arr"][2],
-            self.modeldict["km_arr"][2],
-            self.modeldict["mo"][2],
-            self.modeldict["nt_array"][2],
-            (-jnp.inf, 1.9)
-        )
+        if "nuvk" in self.prior_type.lower():
+            self.e0_pars = PriorParams(
+                0,
+                self.refcategs[0],
+                self.modeldict["fo_arr"][0],
+                self.modeldict["kt_arr"][0],
+                self.modeldict["zo_arr"][0],
+                self.modeldict["a_arr"][0],
+                self.modeldict["km_arr"][0],
+                self.modeldict["mo"][0],
+                self.modeldict["nt_array"][0],
+                (4.25, jnp.inf)
+            )
+            self.sbcd_pars = PriorParams(
+                1,
+                self.refcategs[1],
+                self.modeldict["fo_arr"][1],
+                self.modeldict["kt_arr"][1],
+                self.modeldict["zo_arr"][1],
+                self.modeldict["a_arr"][1],
+                self.modeldict["km_arr"][1],
+                self.modeldict["mo"][1],
+                self.modeldict["nt_array"][1],
+                (1.9, 4.25)
+            )
+            # self.sbc_pars = PriorParams(
+            #     1,
+            #     "Sbc",
+            #     self.modeldict["fo_arr"][1],
+            #     self.modeldict["kt_arr"][1],
+            #     self.modeldict["zo_arr"][1],
+            #     self.modeldict["a_arr"][1],
+            #     self.modeldict["km_arr"][1],
+            #     (3.19, 4.25)
+            # )
+            # self.scd_pars = PriorParams(
+            #     2,
+            #     "Scd",
+            #     self.modeldict["fo_arr"][2],
+            #     self.modeldict["kt_arr"][2],
+            #     self.modeldict["zo_arr"][2],
+            #     self.modeldict["a_arr"][2],
+            #     self.modeldict["km_arr"][2],
+            #     (1.9, 3.19)
+            # )
+            self.irr_pars = PriorParams(
+                2,
+                self.refcategs[2],
+                1-(self.modeldict["fo_arr"][0]+self.modeldict["fo_arr"][1]),
+                -99,
+                self.modeldict["zo_arr"][2],
+                self.modeldict["a_arr"][2],
+                self.modeldict["km_arr"][2],
+                self.modeldict["mo"][2],
+                self.modeldict["nt_array"][2],
+                (-jnp.inf, 1.9)
+            )
+        else:
+            self.sf_pars = PriorParams(
+                0,
+                self.refcategs[0],
+                self.modeldict["fo_arr"][0],
+                self.modeldict["kt_arr"][0],
+                self.modeldict["zo_arr"][0],
+                self.modeldict["a_arr"][0],
+                self.modeldict["km_arr"][0],
+                self.modeldict["mo"][0],
+                self.modeldict["nt_array"][0],
+                None
+            )
+            self.agn_pars = PriorParams(
+                1,
+                self.refcategs[1],
+                self.modeldict["fo_arr"][1],
+                self.modeldict["kt_arr"][1],
+                self.modeldict["zo_arr"][1],
+                self.modeldict["a_arr"][1],
+                self.modeldict["km_arr"][1],
+                self.modeldict["mo"][1],
+                self.modeldict["nt_array"][1],
+                None
+            )
+            self.com_pars = PriorParams(
+                2,
+                self.refcategs[2],
+                self.modeldict["fo_arr"][2],
+                self.modeldict["kt_arr"][2],
+                self.modeldict["zo_arr"][2],
+                self.modeldict["a_arr"][2],
+                self.modeldict["km_arr"][2],
+                self.modeldict["mo"][2],
+                self.modeldict["nt_array"][2],
+                None
+            )
+            self.nc_pars = PriorParams(
+                3,
+                self.refcategs[3],
+                1-(self.modeldict["fo_arr"][0]+self.modeldict["fo_arr"][1]+self.modeldict["fo_arr"][2]),
+                -99,
+                self.modeldict["zo_arr"][3],
+                self.modeldict["a_arr"][3],
+                self.modeldict["km_arr"][3],
+                self.modeldict["mo"][3],
+                self.modeldict["nt_array"][3],
+                None
+            )
 
 
     def open_templates(self, **kwargs):
@@ -598,7 +651,7 @@ class ShireEstimator(CatEstimator):
     @partial(jit, static_argnums=0)
     def _val_prior(self, oimag, z, nuvk):
         nzval = self._val_nz_prior(oimag, z, nuvk)
-        fracval = self._val_frac_prior(oimag, nuvk)
+        fracval = self._val_frac_prior_alaBPZ(oimag, nuvk)
         return nzval*fracval
 
 
