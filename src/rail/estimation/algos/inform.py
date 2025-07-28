@@ -246,14 +246,14 @@ class ShireInformer(CatInformer):
         self.templates_df = None
         self.filters_names = None
         self.color_names = None
-        self.e0_pars = PriorParams(0, self.refcategs[0], None, None, None, None, None, None, None, (4.25, jnp.inf)) if "nuvk" in self.config.prior_type.lower() else None
-        self.sbcd_pars = PriorParams(1, self.refcategs[1], None, None, None, None, None, None, None, (1.9, 4.25)) if "nuvk" in self.config.prior_type.lower() else None
-        self.irr_pars = PriorParams(2, self.refcategs[2], None, None, None, None, None, None, None, (-jnp.inf, 1.9)) if "nuvk" in self.config.prior_type.lower() else None
+        self.e0_pars = PriorParams(0, "E_S0", None, None, None, None, None, None, None, (4.25, jnp.inf))
+        self.sbcd_pars = PriorParams(1, "Sbc/Scd", None, None, None, None, None, None, None, (1.9, 4.25))
+        self.irr_pars = PriorParams(2, "Irr", None, None, None, None, None, None, None, (-jnp.inf, 1.9))
 
-        self.sf_pars = None if "nuvk" in self.config.prior_type.lower() else PriorParams(0, self.refcategs[0], None, None, None, None, None, None, None, None)
-        self.agn_pars = None if "nuvk" in self.config.prior_type.lower() else PriorParams(1, self.refcategs[1], None, None, None, None, None, None, None, None)
-        self.com_pars = None if "nuvk" in self.config.prior_type.lower() else PriorParams(2, self.refcategs[2], None, None, None, None, None, None, None, None)
-        self.nc_pars = None if "nuvk" in self.config.prior_type.lower() else PriorParams(3, self.refcategs[3], None, None, None, None, None, None, None, None)
+        self.sf_pars = PriorParams(3, "Star-forming", None, None, None, None, None, None, None, None)
+        self.agn_pars = PriorParams(4, "AGN", None, None, None, None, None, None, None, None)
+        self.com_pars = PriorParams(5, "Composite", None, None, None, None, None, None, None, None)
+        self.nc_pars = PriorParams(6, "NC", None, None, None, None, None, None, None, None)
 
     '''
     @partial(jit, static_argnums=0)
