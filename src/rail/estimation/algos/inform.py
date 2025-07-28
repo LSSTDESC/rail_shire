@@ -14,7 +14,7 @@ import scipy.optimize as sciop
 import pandas as pd
 #import qp
 #from tqdm import tqdm
-import tables_io
+#import tables_io
 from sklearn.ensemble import RandomForestClassifier
 from ceci.config import StageParameter as Param
 from rail.estimation.estimator import CatInformer
@@ -1063,25 +1063,26 @@ class ShireInformer(CatInformer):
                 templs_score_df.loc[tn, 'name'] = tn
             templs_score_df.sort_values('score', ascending=True, inplace=True)
             '''
-        tables_io.write(
-            templs_score_df,
-            self.config.output,
-            fmt='h5' #'hf5'
-        )
+
+        #tables_io.write(
+        #    templs_score_df,
+        #    self.config.output,
+        #    fmt='h5' #'hf5'
+        #)
 
         self.templates_df = templs_score_df[["name", "num", "score", "Dataset", self.config["redshift_col"]]+_DUMMY_PARS.PARAM_NAMES_FLAT]
         
         res_classif = self.class_nuvk(train_df) if 'nuvk' in self.prior_type.lower() else self.class_bpt(train_df)
+        self.model = dict(
+            fo_arr=self.fo_arr,
+            kt_arr=self.kt_arr,
+            zo_arr=np.array(res_classif[0]),
+            a_arr=np.array(res_classif[1]),
+            km_arr=np.array(res_classif[2]),
+            mo=self.m0,
+            nt_array=self.nt_array
+        )
         if 'nuvk' in self.prior_type.lower(): 
-            self.model = dict(
-                fo_arr=self.fo_arr,
-                kt_arr=self.kt_arr,
-                zo_arr=np.array(res_classif[0]),
-                a_arr=np.array(res_classif[1]),
-                km_arr=np.array(res_classif[2]),
-                mo=self.m0,
-                nt_array=self.nt_array
-            )
             self.e0_pars = PriorParams(
                 0,
                 self.refcategs[0],
