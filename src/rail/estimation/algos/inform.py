@@ -911,9 +911,9 @@ class ShireInformer(CatInformer):
         _order = np.flip(np.argsort(counts))
         unique, counts = unique[_order], counts[_order]
         _cumul = np.cumsum(counts)
-        _last_templ = min(np.argwhere(_cumul > 0.9*_best_templ_idx.shape[0])[0][0], 50)
+        _last_templ = min(np.argwhere(_cumul > 0.9*_best_templ_idx.shape[0])[0][0], self.config.ntemplates-1)
 
-        return unique[:_last_templ], counts[:_last_templ]
+        return unique[:_last_templ+1], counts[:_last_templ+1]
 
     def run(self):
         wls, transm_arr = self._load_filters()
