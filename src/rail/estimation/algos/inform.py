@@ -350,12 +350,12 @@ class ShireInformer(CatInformer):
             training_data[self.config["redshift_col"]]
         )
 
-        _pzs = jnp.histogram_bin_edges(self.szs, bins=100) #'auto')
-        self.pzs = _pzs.at[0].set(
-            min(
-                max(self.config.zmin, 0.001),
-                _pzs[1]
-            )
+        _pedges = jnp.histogram_bin_edges(self.szs, bins=min(100, self.config.nzbins)) #'auto')
+        self.pzs = jnp.linspace(
+            max(self.config.zmin, 0.001),
+            min(self.config.zmax, _pedges[-1]),
+            min(100, self.config.nzbins),
+            endpoint=True
         )
 
     def _load_filters(self):
