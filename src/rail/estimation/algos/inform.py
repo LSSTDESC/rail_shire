@@ -580,8 +580,17 @@ class ShireInformer(CatInformer):
                     ),
                     axis=1
                 ),
-                jnp.concatenate((jnp.zeros(2*self.ntyp), jnp.ones(1), jnp.full(1, -1.0), jnp.zeros(initparams.shape[0]-3*self.ntyp+1))),
-                jnp.concatenate((jnp.zeros(2*self.ntyp), jnp.ones(1), jnp.zeros(1), jnp.full(1, -1.0), jnp.zeros(initparams.shape[0]-3*self.ntyp))),
+                #jnp.concatenate((jnp.zeros(2*self.ntyp), jnp.ones(1), jnp.full(1, -1.0), jnp.zeros(initparams.shape[0]-3*self.ntyp+1))),
+                #jnp.concatenate((jnp.zeros(2*self.ntyp), jnp.ones(1), jnp.zeros(1), jnp.full(1, -1.0), jnp.zeros(initparams.shape[0]-3*self.ntyp))),
+                jnp.concatenate(
+                    (
+                        jnp.zeros((self.ntyp-1, 2*self.ntyp)),
+                        jnp.ones((self.ntyp-1, 1)),
+                        -1.0*jnp.identity(self.ntyp-1),
+                        jnp.zeros((self.ntyp-1, initparams.shape[0]-3*self.ntyp))
+                    ),
+                    axis=1
+                ),
                 jnp.concatenate(
                     (
                         jnp.zeros((3*self.ntyp, 3*self.ntyp)),
@@ -595,7 +604,7 @@ class ShireInformer(CatInformer):
             (jnp.ones(1), jnp.zeros(constrmatrx.shape[0]-1))
         )
         ub = jnp.concatenate(
-            (jnp.ones(1+self.ntyp), jnp.zeros(2), jnp.full(constrmatrx.shape[0]-1-self.ntyp-2, jnp.inf))
+            (jnp.ones(1+self.ntyp), jnp.zeros(self.ntyp-1), jnp.full(constrmatrx.shape[0]-2*self.ntyp, jnp.inf))
         )
 
         _results = sciop.minimize(
@@ -737,22 +746,29 @@ class ShireInformer(CatInformer):
 
         constrmatrx = jnp.concatenate(
             (
-                jnp.expand_dims(
-                    jnp.concatenate((jnp.ones(1), jnp.full(1, -1.0), jnp.zeros(4*self.ntyp-2)), axis=0),
-                    axis=0
-                ),
-                jnp.expand_dims(
-                    jnp.concatenate(
-                        (jnp.ones(1), jnp.zeros(1), jnp.full(1, -1.0), jnp.zeros(4*self.ntyp-3)),
-                        axis=0
+                # jnp.expand_dims(
+                #     jnp.concatenate((jnp.ones(1), jnp.full(1, -1.0), jnp.zeros(4*self.ntyp-2)), axis=0),
+                #     axis=0
+                # ),
+                # jnp.expand_dims(
+                #     jnp.concatenate(
+                #         (jnp.ones(1), jnp.zeros(1), jnp.full(1, -1.0), jnp.zeros(4*self.ntyp-3)),
+                #         axis=0
+                #     ),
+                #     axis=0
+                # ),
+                jnp.concatenate(
+                    (
+                        jnp.ones((self.ntyp-1, 1)),
+                        -1.0*jnp.identity(self.ntyp-1),
+                        jnp.zeros((self.ntyp-1, initparams.shape[0]-self.ntyp))
                     ),
-                    axis=0
+                    axis=1
                 ),
                 jnp.concatenate(
                     (
                         jnp.zeros((3*self.ntyp, self.ntyp)),
-                        jnp.identity(3*self.ntyp)#,
-                        #jnp.zeros((self.ntyp, initparams.shape[0]-2*self.ntyp))
+                        jnp.identity(3*self.ntyp)
                     ),
                     axis=1
                 )
@@ -763,8 +779,8 @@ class ShireInformer(CatInformer):
         lb = jnp.zeros(constrmatrx.shape[0])
         ub = jnp.concatenate(
             (
-                jnp.zeros(2),
-                jnp.full(constrmatrx.shape[0]-2, jnp.inf)
+                jnp.zeros(self.ntyp-1),
+                jnp.full(constrmatrx.shape[0]-self.ntyp+1, jnp.inf)
             )
         )
 
@@ -863,9 +879,9 @@ class ShireInformer(CatInformer):
 
         #z0list, alflist, kmlist = self._fit_prior()
 
-        m0list, z0list, alflist, kmlist = self._find_dndz_params_DEPRECATED()
-        self.m0 = m0list
-        # z0list, alflist, kmlist = self._find_dndz_params()
+        #m0list, z0list, alflist, kmlist = self._find_dndz_params_DEPRECATED()
+        #self.m0 = m0list
+        z0list, alflist, kmlist = self._find_dndz_params()
         self._find_fractions_alaBPZ()
 
         return z0list, alflist, kmlist #jnp.array(z0list), jnp.array(alflist), jnp.array(kmlist)
