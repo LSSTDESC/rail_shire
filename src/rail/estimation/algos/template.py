@@ -230,7 +230,7 @@ def mean_mags(params, wls, filt_trans_arr, z_obs, ssp_data):
     :rtype: _type_
     """
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, rest_sed, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
 
     mags_predictions = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
     # mags_predictions = tree_map(
@@ -356,14 +356,14 @@ def templ_mags(params, wls, filt_trans_arr, z_obs, av, ssp_data):
     """
     _pars = params.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(_pars, z_obs, ssp_data)
+    ssp_wave, sed_restf, sed_attenuated = ssp_spectrum_fromparam(_pars, z_obs, ssp_data)
     _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
     _nuvk = jnp.array(
         [
             calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
             calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
         ]
-    )
+    ) #NUV-K shall not include dust attenuation - Perhaps yes in fact?
 
     mags_predictions = jnp.concatenate((_mags, _nuvk))
 
@@ -551,6 +551,25 @@ v_d4000n_zo_dusty = vmap(calc_d4000n_dusty, in_axes=(None, None, 0, None))
 v_d4000n_dusty = vmap(v_d4000n_zo_dusty, in_axes=(0, None, None, None))
 
 
+@jit
+def d4000n(pars_arr, wls, z_obs, av, ssp_data):
+    _pars = pars_arr.at[13].set(av)
+    sed = mean_spectrum(wls, _pars, z_obs, ssp_data)
+    d4000 = jnp.array(
+        [
+            calc_rest_mag(wls, sed, D4000b_filt.wavelength, D4000b_filt.transmission),
+            calc_rest_mag(wls, sed, D4000r_filt.wavelength, D4000r_filt.transmission)
+        ]
+    )
+
+    return d4000[0]-d4000[1]
+
+vmap_d4000n_av = vmap(d4000n, in_axes=(None, None, None, 0, None))
+vmap_d4000n_zob = vmap(vmap_d4000n_av, in_axes=(None, None, 0, None, None))
+vmap_d4000n_pars = vmap(vmap_d4000n_zob, in_axes=(0, None, None, None, None))
+
+vmap_d4000n_pars_leg = vmap(vmap_d4000n_av, in_axes=(0, None, 0, None, None))
+
 def get_colors_templates(params, wls, z_obs, transm_arr, ssp_data):
     ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
     _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, transm_arr, z_obs)
@@ -666,14 +685,14 @@ def templ_mags_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data):
     """
     _pars = params.at[13].set(av)
     # get the restframe spectra without and with dust attenuation
-    ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(_pars, z_ref, ssp_data)
+    ssp_wave, sed_restf, sed_attenuated = ssp_spectrum_fromparam(_pars, z_ref, ssp_data)
     _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
     _nuvk = jnp.array(
         [
             calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
             calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
         ]
-    )
+    ) # NUV-K shall not include dust attenuation -- Perhaps in fact yes
 
     mags_predictions = jnp.concatenate((_mags, _nuvk))
 
@@ -1026,6 +1045,21 @@ def bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data):
 
 vmap_bpt_rews_dusty = vmap(bpt_rews_pars_zo_dusty, in_axes=(0, None, None))
 
+@jit
+def bpt_rews(templ_pars, zobs, av, ssp_data):
+    _pars = templ_pars.at[13].set(av)
+    _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
+    _wls = jnp.arange(3500.0, 7000.0, 0.1)
+    templ_sed = mean_spectrum(_wls, _pars, zobs, ssp_data)
+    rews = vmap_calc_eqw(_wls, templ_sed, _lines_wl)
+    return rews
+
+vmap_bpt_rews_av = vmap(bpt_rews, in_axes=(None, None, 0, None))
+vmap_bpt_rews_zob = vmap(vmap_bpt_rews_av, in_axes=(None, 0, None, None))
+vmap_bpt_rews_pars = vmap(vmap_bpt_rews_zob, in_axes=(0, None, None, None))
+
+vmap_bpt_rews_pars_leg = vmap(vmap_bpt_rews_av, in_axes=(0, 0, None, None))
+
 
 @jit
 def bpt_rews_pars_leg(templ_pars, zref, ssp_data):
@@ -1062,7 +1096,7 @@ vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, Non
 def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
-    t_nuvk = v_nuvk_zo_dusty(templ_pars, wls, zobs, ssp_data)
+    t_nuvk = v_nuvk_zo_dusty(templ_pars, wls, zobs, ssp_data) #v_nuvk_zo(templ_pars, wls, zobs, ssp_data) -- NUV-K for prior shall perhaps include dust attenuation
     t_d4000n = v_d4000n_zo_dusty(templ_pars, wls, zobs, ssp_data)
     return jnp.column_stack((t_colors, t_rews, t_nuvk, t_d4000n))
 
@@ -1090,7 +1124,7 @@ vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo_leg, in_axes=(0, None,
 def colrs_bptrews_templ_zo_dusty_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data):
     t_rews = bpt_rews_pars_dusty_leg(templ_pars, zref, ssp_data)
     t_colors = vmap_cols_zo_leg(templ_pars, wls, zobs, zref, transm_arr, ssp_data)
-    t_nuvk = calc_nuvk_dusty(templ_pars, wls, zref, ssp_data)
+    t_nuvk = calc_nuvk_dusty(templ_pars, wls, zref, ssp_data) # calc_nuvk(templ_pars, wls, zref, ssp_data) # -- NUV-K for prior shall perhaps include dust attenuation
     t_d4000n = calc_d4000n_dusty(templ_pars, wls, zref, ssp_data)
     return jnp.column_stack(
         (
@@ -1104,7 +1138,7 @@ def colrs_bptrews_templ_zo_dusty_leg(templ_pars, wls, zobs, zref, transm_arr, ss
 vmap_colrs_bptrews_templ_zo_dusty = vmap(colrs_bptrews_templ_zo_dusty_leg, in_axes=(0, None, None, 0, None, None))
 
 
-def bpt_classif(templ_df, ssp_data, zkey='redshift', dusty=False):
+def bpt_classif(templ_df, ssp_data, zkey='redshift', dusty=True):
     """bpt_classif Use Restframe Equivalent Widths to provide an rudimentary classification of galaxies, using BPT diagrams as described in
     [Kewley et al., 2006](https://ui.adsabs.harvard.edu/abs/2006MNRAS.372..961K/abstract).
 
