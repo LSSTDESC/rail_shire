@@ -1113,7 +1113,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][0],
                 self.model["a_arr"][0],
                 self.model["km_arr"][0],
-                self.model["mo"][0],
+                self.model["mo"],
                 self.model["nt_array"][0],
                 (4.25, jnp.inf)
             )
@@ -1125,7 +1125,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][1],
                 self.model["a_arr"][1],
                 self.model["km_arr"][1],
-                self.model["mo"][1],
+                self.model["mo"],
                 self.model["nt_array"][1],
                 (1.9, 4.25)
             )
@@ -1157,7 +1157,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][2],
                 self.model["a_arr"][2],
                 self.model["km_arr"][2],
-                self.model["mo"][2],
+                self.model["mo"],
                 self.model["nt_array"][2],
                 (-jnp.inf, 1.9)
             )
@@ -1170,7 +1170,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][0],
                 self.model["a_arr"][0],
                 self.model["km_arr"][0],
-                self.model["mo"][0],
+                self.model["mo"],
                 self.model["nt_array"][0],
                 None
             )
@@ -1182,7 +1182,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][1],
                 self.model["a_arr"][1],
                 self.model["km_arr"][1],
-                self.model["mo"][1],
+                self.model["mo"],
                 self.model["nt_array"][1],
                 None
             )
@@ -1194,7 +1194,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][2],
                 self.model["a_arr"][2],
                 self.model["km_arr"][2],
-                self.model["mo"][2],
+                self.model["mo"],
                 self.model["nt_array"][2],
                 None
             )
@@ -1206,7 +1206,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][3],
                 self.model["a_arr"][3],
                 self.model["km_arr"][3],
-                self.model["mo"][3],
+                self.model["mo"],
                 self.model["nt_array"][3],
                 None
             )
