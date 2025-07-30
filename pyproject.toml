@@ -34,7 +34,9 @@ dependencies = [
     "pz-rail-dsps",
     "astro-sedpy",
     "matplotlib",
-    "seaborn"
+    "seaborn",
+    "qp_prob<1",
+    "tables_io<1"
 ]
 
 # On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
