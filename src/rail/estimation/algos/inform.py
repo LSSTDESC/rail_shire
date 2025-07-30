@@ -1101,7 +1101,7 @@ class ShireInformer(CatInformer):
             zo_arr=np.array(res_classif[0]),
             a_arr=np.array(res_classif[1]),
             km_arr=np.array(res_classif[2]),
-            mo=self.m0,
+            mo=self.m0[0],
             nt_array=self.nt_array
         )
         if 'nuvk' in self.prior_type.lower(): 

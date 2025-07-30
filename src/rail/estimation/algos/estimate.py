@@ -171,8 +171,8 @@ class ShireEstimator(CatEstimator):
             if self.is_mpi():  # pragma: no cover
                 self.comm.Barrier()
 
-    def open_model(self, **kwargs):
-        CatEstimator.open_model(self, **kwargs)
+    def open_model(self, tag="model", **kwargs):
+        CatEstimator.open_model(self, tag=tag, **kwargs)
         self.modeldict = self.model
         if "nuvk" in self.prior_type.lower():
             self.e0_pars = PriorParams(
@@ -183,7 +183,7 @@ class ShireEstimator(CatEstimator):
                 self.modeldict["zo_arr"][0],
                 self.modeldict["a_arr"][0],
                 self.modeldict["km_arr"][0],
-                self.modeldict["mo"][0],
+                self.modeldict["mo"],
                 self.modeldict["nt_array"][0],
                 (4.25, jnp.inf)
             )
@@ -195,7 +195,7 @@ class ShireEstimator(CatEstimator):
                 self.modeldict["zo_arr"][1],
                 self.modeldict["a_arr"][1],
                 self.modeldict["km_arr"][1],
-                self.modeldict["mo"][1],
+                self.modeldict["mo"],
                 self.modeldict["nt_array"][1],
                 (1.9, 4.25)
             )
@@ -227,7 +227,7 @@ class ShireEstimator(CatEstimator):
                 self.modeldict["zo_arr"][2],
                 self.modeldict["a_arr"][2],
                 self.modeldict["km_arr"][2],
-                self.modeldict["mo"][2],
+                self.modeldict["mo"],
                 self.modeldict["nt_array"][2],
                 (-jnp.inf, 1.9)
             )
@@ -240,7 +240,7 @@ class ShireEstimator(CatEstimator):
                 self.modeldict["zo_arr"][0],
                 self.modeldict["a_arr"][0],
                 self.modeldict["km_arr"][0],
-                self.modeldict["mo"][0],
+                self.modeldict["mo"],
                 self.modeldict["nt_array"][0],
                 None
             )
@@ -252,7 +252,7 @@ class ShireEstimator(CatEstimator):
                 self.modeldict["zo_arr"][1],
                 self.modeldict["a_arr"][1],
                 self.modeldict["km_arr"][1],
-                self.modeldict["mo"][1],
+                self.modeldict["mo"],
                 self.modeldict["nt_array"][1],
                 None
             )
@@ -264,7 +264,7 @@ class ShireEstimator(CatEstimator):
                 self.modeldict["zo_arr"][2],
                 self.modeldict["a_arr"][2],
                 self.modeldict["km_arr"][2],
-                self.modeldict["mo"][2],
+                self.modeldict["mo"],
                 self.modeldict["nt_array"][2],
                 None
             )
@@ -276,7 +276,7 @@ class ShireEstimator(CatEstimator):
                 self.modeldict["zo_arr"][3],
                 self.modeldict["a_arr"][3],
                 self.modeldict["km_arr"][3],
-                self.modeldict["mo"][3],
+                self.modeldict["mo"],
                 self.modeldict["nt_array"][3],
                 None
             )
