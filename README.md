@@ -1,4 +1,6 @@
 
+**TEMPORARY FIX: to avoid incompatibilities that were noticed on platforms other than NERSC, the `pyproject.toml` file now imposes `numpy<2` and corresponding `qp` and `tables_io` versions. This may cause clashes with existing `RAIL` installation, please be careful and install `RAIL_SHIRE` in a separate environment.**
+
 # `rail_shire`
 `SHIRE` stands for **S**tar-formation **HI**story **R**edshift **E**stimator. It is a photometric redshift estimation code, that works on the principle of *Template Fitting* (TF).
 Unlike most other TF codes, `SHIRE` does not use SED templates in `ASCII` files; rather, it synthetises reference photometry along a specified redshift grid using *Stellar Population Synthesis*. To do so, *templates* are given as a set of parameters compatible with the SPS tool [DSPS](https://dsps.readthedocs.io/en/latest/) [(Hearin *et al.*, 2023)](https://ui.adsabs.harvard.edu/abs/2023MNRAS.521.1741H/abstract).
