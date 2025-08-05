@@ -568,7 +568,17 @@ vmap_d4000n_av = vmap(d4000n, in_axes=(None, None, None, 0, None))
 vmap_d4000n_zob = vmap(vmap_d4000n_av, in_axes=(None, None, 0, None, None))
 vmap_d4000n_pars = vmap(vmap_d4000n_zob, in_axes=(0, None, None, None, None))
 
+def treemap_d4000(pars_arr, wls, z_obs, av, ssp_data):
+    templ_tupl = [tuple(_pars) for _pars in pars_arr]
+    reslist_of_tupl = tree_map(lambda partup: vmap_d4000n_zob(jnp.array(partup), wls, z_obs, av, ssp_data), templ_tupl, is_leaf=istuple)
+    return reslist_of_tupl
+
 vmap_d4000n_pars_leg = vmap(vmap_d4000n_av, in_axes=(0, None, 0, None, None))
+
+def treemap_d4000_leg(pars_arr, wls, zref, av, ssp_data):
+    templ_tupl = [tuple(_pars)+tuple([z]) for _pars, z in zip(pars_arr, zref, strict=True)]
+    reslist_of_tupl = tree_map(lambda partup: vmap_d4000n_av(jnp.array(partup[:-1]), wls, partup[-1], av, ssp_data), templ_tupl, is_leaf=istuple)
+    return reslist_of_tupl
 
 def get_colors_templates(params, wls, z_obs, transm_arr, ssp_data):
     ssp_wave, _, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
@@ -1058,7 +1068,17 @@ vmap_bpt_rews_av = vmap(bpt_rews, in_axes=(None, None, 0, None))
 vmap_bpt_rews_zob = vmap(vmap_bpt_rews_av, in_axes=(None, 0, None, None))
 vmap_bpt_rews_pars = vmap(vmap_bpt_rews_zob, in_axes=(0, None, None, None))
 
+def treemap_bpt(templ_pars, zobs, av, ssp_data):
+    templ_tupl = [tuple(_pars) for _pars in templ_pars]
+    reslist_of_tupl = tree_map(lambda partup: vmap_bpt_rews_zob(jnp.array(partup), zobs, av, ssp_data), templ_tupl, is_leaf=istuple)
+    return reslist_of_tupl
+
 vmap_bpt_rews_pars_leg = vmap(vmap_bpt_rews_av, in_axes=(0, 0, None, None))
+
+def treemap_bpt_leg(templ_pars, zref, av, ssp_data):
+    templ_tupl = [tuple(_pars)+tuple([z]) for _pars, z in zip(templ_pars, zref, strict=True)]
+    reslist_of_tupl = tree_map(lambda partup: vmap_bpt_rews_av(jnp.array(partup[:-1]), partup[-1], av, ssp_data), templ_tupl, is_leaf=istuple)
+    return reslist_of_tupl
 
 
 @jit

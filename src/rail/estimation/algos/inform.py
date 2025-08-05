@@ -51,8 +51,8 @@ from .template import (
     #v_d4000n_dusty,
     calc_d4000n,
     #calc_d4000n_dusty,
-    vmap_d4000n_pars,
-    vmap_d4000n_pars_leg,
+    treemap_d4000,
+    treemap_d4000_leg,
     #v_nuvk,
     v_nuvk_dusty,
     #calc_nuvk,
@@ -64,8 +64,8 @@ from .template import (
     #vmap_bpt_rews_leg,
     #vmap_bpt_rews_dusty,
     #vmap_bpt_rews_dusty_leg,
-    vmap_bpt_rews_pars,
-    vmap_bpt_rews_pars_leg,
+    treemap_bpt,
+    treemap_bpt_leg,
 )
 from .galaxy import val_neg_log_likelihood, vmap_mags_to_i_and_colors
 from .filter import get_sedpy
@@ -416,13 +416,13 @@ class ShireInformer(CatInformer):
                 self.avs,
                 sspdata
             )
-            templ_rews = vmap_bpt_rews_pars(
+            templ_rews = treemap_bpt(
                 templ_pars_arr,
                 pzs,
                 self.avs,
                 sspdata
             )
-            templ_d4k = vmap_d4000n_pars(templ_pars_arr, fwls, pzs, self.avs, sspdata)
+            templ_d4k = treemap_d4000(templ_pars_arr, fwls, pzs, self.avs, sspdata)
         else:
             templ_tupl_sps = make_legacy_templates(
                 templ_pars_arr,
@@ -433,13 +433,13 @@ class ShireInformer(CatInformer):
                 self.avs,
                 sspdata
             )
-            templ_rews = vmap_bpt_rews_pars_leg(
+            templ_rews = treemap_bpt_leg(
                 templ_pars_arr,
                 templ_zref,
                 self.avs,
                 sspdata
             )
-            templ_d4k = vmap_d4000n_pars_leg(templ_pars_arr, fwls, templ_zref, self.avs, sspdata)
+            templ_d4k = treemap_d4000_leg(templ_pars_arr, fwls, templ_zref, self.avs, sspdata)
 
         filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
         color_names = [f"{n1}-{n2}" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
@@ -454,7 +454,7 @@ class ShireInformer(CatInformer):
         ]
         templs_as_dict = {}
         for it, (tname, row) in enumerate(templs_df.iterrows()):
-            _colrs, _nuvk, _rews, _d4k = jnp.array(templ_tupl_sps[it][0]), jnp.array(templ_tupl_sps[it][1]), templ_rews[it], templ_d4k[it]
+            _colrs, _nuvk, _rews, _d4k = jnp.array(templ_tupl_sps[it][0]), jnp.array(templ_tupl_sps[it][1]), jnp.array(templ_rews[it]), jnp.array(templ_d4k[it])
             if "sps" not in self.config.templ_type.lower():
                 _d4k = jnp.repeat(jnp.expand_dims(_d4k, axis=0), _colrs.shape[0], axis=0)
                 _rews = jnp.repeat(jnp.expand_dims(_rews, axis=0), _colrs.shape[0], axis=0)
@@ -1101,7 +1101,7 @@ class ShireInformer(CatInformer):
             zo_arr=np.array(res_classif[0]),
             a_arr=np.array(res_classif[1]),
             km_arr=np.array(res_classif[2]),
-            mo=self.m0,
+            mo=self.m0[0],
             nt_array=self.nt_array
         )
         if 'nuvk' in self.prior_type.lower(): 
@@ -1113,7 +1113,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][0],
                 self.model["a_arr"][0],
                 self.model["km_arr"][0],
-                self.model["mo"][0],
+                self.model["mo"],
                 self.model["nt_array"][0],
                 (4.25, jnp.inf)
             )
@@ -1125,7 +1125,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][1],
                 self.model["a_arr"][1],
                 self.model["km_arr"][1],
-                self.model["mo"][1],
+                self.model["mo"],
                 self.model["nt_array"][1],
                 (1.9, 4.25)
             )
@@ -1157,7 +1157,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][2],
                 self.model["a_arr"][2],
                 self.model["km_arr"][2],
-                self.model["mo"][2],
+                self.model["mo"],
                 self.model["nt_array"][2],
                 (-jnp.inf, 1.9)
             )
@@ -1170,7 +1170,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][0],
                 self.model["a_arr"][0],
                 self.model["km_arr"][0],
-                self.model["mo"][0],
+                self.model["mo"],
                 self.model["nt_array"][0],
                 None
             )
@@ -1182,7 +1182,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][1],
                 self.model["a_arr"][1],
                 self.model["km_arr"][1],
-                self.model["mo"][1],
+                self.model["mo"],
                 self.model["nt_array"][1],
                 None
             )
@@ -1194,7 +1194,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][2],
                 self.model["a_arr"][2],
                 self.model["km_arr"][2],
-                self.model["mo"][2],
+                self.model["mo"],
                 self.model["nt_array"][2],
                 None
             )
@@ -1206,7 +1206,7 @@ class ShireInformer(CatInformer):
                 self.model["zo_arr"][3],
                 self.model["a_arr"][3],
                 self.model["km_arr"][3],
-                self.model["mo"][3],
+                self.model["mo"],
                 self.model["nt_array"][3],
                 None
             )
