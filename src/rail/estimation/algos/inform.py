@@ -1,5 +1,5 @@
 import os
-import jax
+#import jax
 import numpy as np
 from collections import namedtuple
 from functools import partial
@@ -78,7 +78,7 @@ except ImportError:
     except ImportError:
         from jax.numpy import trapz as trapezoid
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 PriorParams = namedtuple("PriorParams", ["mod", "type", "fo", "kt", "z0", "alpha", "km", "m0", "nt", "nuv_range"])
 

@@ -10,7 +10,7 @@ Created on Thu Aug 1 12:59:33 2024
 
 from functools import partial
 
-import jax
+#import jax
 import pandas as pd
 import numpy as np
 from jax import jit, vmap
@@ -37,7 +37,7 @@ from .io_utils import istuple
 from .analysis import C_KMS, lsunPerHz_to_flam_noU, _DUMMY_PARS
 from .filter import NUV_filt, NIR_filt, D4000b_filt, D4000r_filt
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 TODAY_GYR = age_at_z0(*DEFAULT_COSMOLOGY)  # 13.8
 T_ARR = jnp.linspace(0.1, TODAY_GYR, 100)
