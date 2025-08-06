@@ -1,5 +1,5 @@
 import os
-import jax
+#import jax
 from functools import partial
 import numpy as np
 from jax import numpy as jnp
@@ -27,7 +27,7 @@ except ImportError:
     except ImportError:
         from jax.numpy import trapz as trapezoid
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 class ShireEstimator(CatEstimator):
     """CatEstimator subclass to implement basic marginalized PDF for BPZ
