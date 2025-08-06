@@ -422,7 +422,7 @@ class ShireInformer(CatInformer):
                 self.avs,
                 sspdata
             )
-            templ_d4k = treemap_d4000(templ_pars_arr, fwls, pzs, self.avs, sspdata)
+            templ_d4k = treemap_d4000(templ_pars_arr, pzs, self.avs, sspdata)
         else:
             templ_tupl_sps = make_legacy_templates(
                 templ_pars_arr,
@@ -439,7 +439,7 @@ class ShireInformer(CatInformer):
                 self.avs,
                 sspdata
             )
-            templ_d4k = treemap_d4000_leg(templ_pars_arr, fwls, templ_zref, self.avs, sspdata)
+            templ_d4k = treemap_d4000_leg(templ_pars_arr, templ_zref, self.avs, sspdata)
 
         filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
         color_names = [f"{n1}-{n2}" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
@@ -1553,19 +1553,19 @@ class ShireInformer(CatInformer):
                 vmap_mean_spectrum(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
-            nuvk = v_nuvk_dusty(templ_pars, wls, redshifts, sspdata)
-            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            nuvk = v_nuvk_dusty(templ_pars, redshifts, sspdata)
+            _selnorm = jnp.logical_and(wls>=3950, wls<=4000)
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
             _vspec = vmap(mean_spectrum, in_axes=(None, 0, 0, None))
-            _vnuvk = vmap(calc_nuvk_dusty, in_axes=(0, None, 0, None))
+            _vnuvk = vmap(calc_nuvk_dusty, in_axes=(0, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
                 0.001
             )
-            nuvk = _vnuvk(templ_pars, wls, templ_zref, sspdata)
-            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            nuvk = _vnuvk(templ_pars, templ_zref, sspdata)
+            _selnorm = jnp.logical_and(wls>=3950, wls<=4000)
             norms = jnp.nanmean(restframe_fnus[:, _selnorm], axis=1)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 1)
         
@@ -1643,19 +1643,19 @@ class ShireInformer(CatInformer):
                 vmap_mean_spectrum_nodust(wls, templ_pars, redshifts, sspdata),
                 0.001
             )
-            d4000n = v_d4000n(templ_pars, wls, redshifts, sspdata)
-            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            d4000n = v_d4000n(templ_pars, redshifts, sspdata)
+            _selnorm = jnp.logical_and(wls>=3950, wls<=4000)
             norms = jnp.nanmean(restframe_fnus[:, :, _selnorm], axis=2)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 2)
         else:
             _vspec = vmap(mean_spectrum_nodust, in_axes=(None, 0, 0, None))
-            _vd4k = vmap(calc_d4000n, in_axes=(0, None, 0, None))
+            _vd4k = vmap(calc_d4000n, in_axes=(0, 0, None))
             restframe_fnus = lsunPerHz_to_fnu_noU(
                 _vspec(wls, templ_pars, templ_zref, sspdata),
                 0.001
             )
-            d4000n = _vd4k(templ_pars, wls, templ_zref, sspdata)
-            _selnorm = jnp.logical_and(wls>3950, wls<4000)
+            d4000n = _vd4k(templ_pars, templ_zref, sspdata)
+            _selnorm = jnp.logical_and(wls>=3950, wls<=4000)
             norms = jnp.nanmean(restframe_fnus[:, _selnorm], axis=1)
             restframe_fnus = restframe_fnus/jnp.expand_dims(jnp.squeeze(norms), 1)
         rbmap = mpl.colormaps['coolwarm']
