@@ -34,7 +34,7 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 try:
     SHIREDATALOC = os.environ["SHIREDATALOC"]
 except KeyError:
-    SHIREDATALOC = os.path.abspath(os.path.join(_script_dir, "../../../examples", "data"))
+    SHIREDATALOC = os.path.abspath(os.path.join(_script_dir, "..", "..", "..", "..", "examples", "data"))
     os.environ["SHIREDATALOC"] = SHIREDATALOC
 print(f"Default location for rail_shire data set to {SHIREDATALOC}.")
 
