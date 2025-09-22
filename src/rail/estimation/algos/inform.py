@@ -1652,25 +1652,24 @@ class ShireInformer(CatInformer):
         for x, y in zip(all_tsels_df["log([NII]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
             if not (np.isfinite(x) and np.isfinite(y)):
                 cat_nii.append("NC")
-            elif y < Ka03_nii(x):
-                cat_nii.append("Star-forming")
-            elif y < Ke01_nii(x):
+            elif y >= Ke01_nii(x) or x >= 0.47:
+                cat_nii.append("AGN")
+            elif y >= Ka03_nii(x) or x >= 0.05:
                 cat_nii.append("Composite")
             else:
-                cat_nii.append("AGN")
-
+                cat_nii.append("Star-forming")
         all_tsels_df["CAT_NII"] = np.array(cat_nii)
 
         cat_sii = []
         for x, y in zip(all_tsels_df["log([SII]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
             if not (np.isfinite(x) and np.isfinite(y)):
                 cat_sii.append("NC")
-            elif y < Ke01_sii(x):
-                cat_sii.append("Star-forming")
-            elif y < Ke06_sii(x):
+            elif y >= Ke06_sii(x):
+                cat_sii.append("Seyferts")
+            elif y >= Ke01_sii(x) or x>=0.32:
                 cat_sii.append("LINER")
             else:
-                cat_sii.append("Seyferts")
+                cat_sii.append("Star-forming")
 
         all_tsels_df["CAT_SII"] = np.array(cat_sii)
 
@@ -1678,12 +1677,12 @@ class ShireInformer(CatInformer):
         for x, y in zip(all_tsels_df["log([OI]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
             if not (np.isfinite(x) and np.isfinite(y)):
                 cat_oi.append("NC")
-            elif y < Ke01_oi(x):
-                cat_oi.append("Star-forming")
-            elif y < Ke06_oi(x):
+            elif y >= Ke06_oi(x):
+                cat_oi.append("Seyferts")
+            elif y >= Ke01_oi(x) or x >= -0.59:
                 cat_oi.append("LINER")
             else:
-                cat_oi.append("Seyferts")
+                cat_oi.append("Star-forming")
 
         all_tsels_df["CAT_OI"] = np.array(cat_oi)
 
@@ -1691,12 +1690,12 @@ class ShireInformer(CatInformer):
         for x, y in zip(all_tsels_df["log([OI]/[Ha])"], all_tsels_df["log([OIII]/[OII])"], strict=False):
             if not (np.isfinite(x) and np.isfinite(y)):
                 cat_oii.append("NC")
-            elif y < lim_HII_comp(x):
-                cat_oii.append("SF / composite")
-            elif y < lim_seyf_liner(x):
+            elif y >= lim_seyf_liner(x):
+                cat_oii.append("Seyferts")
+            elif y >= lim_HII_comp(x):
                 cat_oii.append("LINER")
             else:
-                cat_oii.append("Seyferts")
+                cat_oii.append("SF / composite")
 
         all_tsels_df["CAT_OIII/OIIvsOI"] = np.array(cat_oii)
 
@@ -1726,19 +1725,25 @@ class ShireInformer(CatInformer):
                     ax=a
                 )
 
-                _x = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
                 if "NII" in cat:
-                    a.plot(_x, Ka03_nii(_x), 'k-', lw=1)
-                    a.plot(_x, Ke01_nii(_x), 'k-', lw=1)
+                    _xa = np.linspace(np.nanmin(all_tsels_df[x]), 0.05, 100, endpoint=False)
+                    a.plot(_xa, Ka03_nii(_xa), 'k-', lw=1)
+                    _xe = np.linspace(np.nanmin(all_tsels_df[x]), 0.47, 100, endpoint=False)
+                    a.plot(_xe, Ke01_nii(_xe), 'k:', lw=1)
                 elif "SII" in cat:
-                    a.plot(_x, Ke01_sii(_x), 'k-', lw=1)
-                    a.plot(_x, Ke06_sii(_x), 'k-', lw=1)
+                    _x1 = np.linspace(np.nanmin(all_tsels_df[x]), 0.32, 100, endpoint=False)
+                    a.plot(_x1, Ke01_sii(_x1), 'k-', lw=1)
+                    _x6 = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
+                    a.plot(_x6, Ke06_sii(_x6), 'k:', lw=1)
                 elif "OII" in cat:
+                    _x = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
                     a.plot(_x, lim_HII_comp(_x), 'k-', lw=1)
-                    a.plot(_x, lim_seyf_liner(_x), 'k-', lw=1)
+                    a.plot(_x, lim_seyf_liner(_x), 'k:', lw=1)
                 else:
-                    a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
-                    a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
+                    _x1 = np.linspace(np.nanmin(all_tsels_df[x]), -0.59, 100, endpoint=False)
+                    a.plot(_x1, Ke01_oi(_x1), 'k-', lw=1)
+                    _x6 = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
+                    a.plot(_x6, Ke06_oi(_x6), 'k:', lw=1)
                 a.set_xlim(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]))
                 a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
                 fig_list.append(f)
