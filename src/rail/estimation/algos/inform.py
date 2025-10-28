@@ -34,7 +34,9 @@ from .template import (
     #vmap_cols_zo,
     #vmap_cols_zo_leg,
     make_sps_templates,
+    make_sps_templates_noav,
     make_legacy_templates,
+    make_legacy_templates_noav,
     #colrs_bptrews_templ_zo_dusty,
     #colrs_bptrews_templ_zo_dusty_leg,
     lim_HII_comp,
@@ -52,7 +54,9 @@ from .template import (
     calc_d4000n,
     #calc_d4000n_dusty,
     treemap_d4000,
+    treemap_d4000_noav,
     treemap_d4000_leg,
+    treemap_d4000_noav_leg,
     #v_nuvk,
     v_nuvk_dusty,
     #calc_nuvk,
@@ -65,7 +69,9 @@ from .template import (
     #vmap_bpt_rews_dusty,
     #vmap_bpt_rews_dusty_leg,
     treemap_bpt,
+    treemap_bpt_noav,
     treemap_bpt_leg,
+    treemap_bpt_noav_leg
 )
 from .galaxy import val_neg_log_likelihood, vmap_mags_to_i_and_colors
 from .filter import get_sedpy
@@ -473,6 +479,94 @@ class ShireInformer(CatInformer):
                 _df[self.config.redshift_col] = np.full(pzs.shape, row[self.config.redshift_col])
                 _dflist.append(_df)
             templs_as_dict.update({f"{tname}": pd.concat(_dflist, ignore_index=True)})
+        all_templs_df = pd.concat(
+            [_df for _, _df in templs_as_dict.items()],
+            ignore_index=True
+        )
+
+        return all_templs_df
+
+
+    def _load_templates_nodustvar(self):
+        # The redshift range we will evaluate on
+        pzs = np.histogram_bin_edges(self.szs, bins='auto')
+
+        sspdata = load_ssp(
+            os.path.abspath(
+                os.path.join(
+                    self.data_path,
+                    "SSP",
+                    self.config.ssp_file
+                )
+            )
+        )
+
+        fwls, ftransm = self._load_filters()
+
+        templs_df = self.templates_df
+        templ_pars_arr = jnp.array(templs_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
+        templ_zref = jnp.array(templs_df[self.config.redshift_col])
+
+        if "sps" in self.config.templ_type.lower():
+            templ_tupl_sps = make_sps_templates_noav(
+                templ_pars_arr,
+                fwls,
+                ftransm,
+                pzs,
+                sspdata
+            )
+            templ_rews = treemap_bpt_noav(
+                templ_pars_arr,
+                pzs,
+                sspdata
+            )
+            templ_d4k = treemap_d4000_noav(templ_pars_arr, pzs, sspdata)
+        else:
+            templ_tupl_sps = make_legacy_templates_noav(
+                templ_pars_arr,
+                templ_zref,
+                fwls,
+                ftransm,
+                pzs,
+                sspdata
+            )
+            templ_rews = treemap_bpt_noav_leg(
+                templ_pars_arr,
+                templ_zref,
+                sspdata
+            )
+            templ_d4k = treemap_d4000_noav_leg(templ_pars_arr, templ_zref, sspdata)
+
+        filters_names = [_fnam for _fnam, _fdir in self.config.filter_dict.items()]
+        color_names = [f"{n1}-{n2}" for n1,n2 in zip(filters_names[:-1], filters_names[1:])]
+        lines_names = [
+            "SF_[OII]_3728.48_REW",
+            "Balmer_HI_4862.68_REW",
+            "AGN_[OIII]_5008.24_REW",
+            "SF_[OI]_6302.046_REW",
+            "Balmer_HI_6564.61_REW",
+            "AGN_[NII]_6585.27_REW",
+            "AGN_[SII]_6718.29_REW"
+        ]
+        templs_as_dict = {}
+        for it, (tname, row) in enumerate(templs_df.iterrows()):
+            _colrs, _nuvk, _rews, _d4k = jnp.array(templ_tupl_sps[it][0]), jnp.array(templ_tupl_sps[it][1]), jnp.array(templ_rews[it]), jnp.array(templ_d4k[it])
+            if "sps" not in self.config.templ_type.lower():
+                _d4k = jnp.repeat(jnp.expand_dims(_d4k, axis=0), _colrs.shape[0], axis=0)
+                _rews = jnp.repeat(jnp.expand_dims(_rews, axis=0), _colrs.shape[0], axis=0)
+
+            _df = pd.DataFrame(
+                columns=color_names+['NUVK', 'D4000n']+lines_names,
+                data=np.column_stack(
+                    (_colrs, _nuvk, _d4k, _rews)
+                )
+            )
+            _df['z_p'] = pzs
+            _df['Av'] = np.full(pzs.shape, row['AV'])
+            _df['Dataset'] = np.full(pzs.shape, row['Dataset'])
+            _df['name'] = np.full(pzs.shape, tname)
+            _df[self.config.redshift_col] = np.full(pzs.shape, row[self.config.redshift_col])
+            templs_as_dict.update({f"{tname}": _df})
         all_templs_df = pd.concat(
             [_df for _, _df in templs_as_dict.items()],
             ignore_index=True
@@ -1250,7 +1344,58 @@ class ShireInformer(CatInformer):
         if order is None and hue=='CAT_NUVK':
             order=self.refcategs
 
-        self._load_training()
+        all_tsels_df = self._nuvk_classif_nodustvar()
+        train_df = pd.DataFrame(
+            data=jnp.column_stack(
+                (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
+            ),
+            columns=self.color_names+[self.config.ref_band, self.config.redshift_col]
+        )
+
+        leg1 = mlines.Line2D([], [], color='gray', label=trainlabel, marker='o', markersize=6, alpha=0.7, ls='')
+        fig_list = []
+        for ix, (c1, c2) in enumerate(zip(self.color_names[:-1], self.color_names[1:])):
+            f,a = plt.subplots(1,1, constrained_layout=True)
+            # Create a legend for the first line.
+            
+            sns.scatterplot(
+                data=train_df,
+                x=c1,
+                y=c2,
+                c='gray',
+                size='redshift',
+                sizes=(10, 500),
+                ax=a,
+                legend=False,
+                alpha=0.1
+            )
+            
+            sns.scatterplot(
+                data=all_tsels_df,
+                x=c1,
+                y=c2,
+                ax=a,
+                size='z_p',
+                sizes=(10, 500),
+                alpha=0.25,
+                hue=hue,
+                hue_order=order,
+                style=style,
+                legend='brief'
+            )
+            a.grid()
+
+            handles, labels = a.get_legend_handles_labels()
+            a.legend(handles=[handles[0]]+[leg1]+handles, labels=['Training set']+[trainlabel]+labels)
+            fig_list.append(f)
+            plt.show()
+        return fig_list
+
+
+    def plot_colrs_templates_wdust(self, hue='CAT_NUVK', style='Dataset', order=None, trainlabel='Colours/redshift'):
+        if order is None and hue=='CAT_NUVK':
+            order=self.refcategs
+
         all_tsels_df = self._nuvk_classif()
         train_df = pd.DataFrame(
             data=jnp.column_stack(
@@ -1271,10 +1416,10 @@ class ShireInformer(CatInformer):
                 y=c2,
                 c='gray',
                 size='redshift',
-                sizes=(10, 100),
+                sizes=(10, 500),
                 ax=a,
                 legend=False,
-                alpha=0.2
+                alpha=0.1
             )
             
             sns.scatterplot(
@@ -1283,8 +1428,8 @@ class ShireInformer(CatInformer):
                 y=c2,
                 ax=a,
                 size='z_p',
-                sizes=(10, 100),
-                alpha=0.5,
+                sizes=(10, 500),
+                alpha=0.25,
                 hue=hue,
                 hue_order=order,
                 style=style,
@@ -1298,8 +1443,63 @@ class ShireInformer(CatInformer):
             plt.show()
         return fig_list
 
-    def hist_colrs_templates(self, hue='Dataset', trainlabel='Training data', bins=60):
-        self._load_training()
+
+    def hist_colrs_templates(self, hue='Dataset', trainlabel='Training data', bins=60, **kwargs):
+        all_tsels_df = self._nuvk_classif_nodustvar()
+        train_df = pd.DataFrame(
+            data=jnp.column_stack(
+                (self.mags[:, :-1]-self.mags[:, 1:], self.refmags, self.szs)
+            ),
+            columns=self.color_names+[self.config.ref_band, self.config.redshift_col]
+        )
+
+        train_patch = mpatches.Patch(edgecolor='k', facecolor='grey', label=trainlabel, alpha=0.7)
+
+        list_edges = []
+        fig_list = []
+        for idc, c in enumerate(self.color_names):
+            _arr = np.array(train_df[c])
+            H_data_1D, _edges1d = np.histogram(_arr[np.isfinite(_arr)], bins=bins)
+            H_templ_1d, _edges1d = np.histogram(np.array(all_tsels_df[c]), bins=_edges1d) 
+            list_edges.append(_edges1d)
+            
+            f,a = plt.subplots(1,1)
+
+            sns.histplot(
+                data=train_df,
+                x=c,
+                bins=_edges1d,
+                label=trainlabel,
+                color='grey',
+                ax=a,
+                legend=False,
+                **kwargs
+            )
+
+            sns.histplot(
+                data=all_tsels_df,
+                x=c,
+                bins=_edges1d,
+                hue=hue,
+                alpha=0.5,
+                ax=a,
+                legend=True,
+                **kwargs
+            )
+
+            old_legend = a.get_legend()
+            handles = old_legend.legend_handles
+            labels = [t.get_text()+' templates' for t in old_legend.get_texts()]
+            title = old_legend.get_title().get_text()
+            
+            a.legend(handles=[train_patch]+handles, labels=[trainlabel]+labels, title=title, loc='best')
+            fig_list.append(f)
+            
+            plt.show()
+        return fig_list
+
+
+    def hist_colrs_templates_wdust(self, hue='Dataset', trainlabel='Training data', bins=60, **kwargs):
         all_tsels_df = self._nuvk_classif()
         train_df = pd.DataFrame(
             data=jnp.column_stack(
@@ -1324,23 +1524,22 @@ class ShireInformer(CatInformer):
                 data=train_df,
                 x=c,
                 bins=_edges1d,
-                stat='density',
-                label='Training data',
+                label=trainlabel,
                 color='grey',
                 ax=a,
-                legend=False
+                legend=False,
+                **kwargs
             )
 
             sns.histplot(
                 data=all_tsels_df,
                 x=c,
                 bins=_edges1d,
-                stat='density',
-                multiple='stack',
                 hue=hue,
                 alpha=0.7,
                 ax=a,
-                legend=True
+                legend=True,
+                **kwargs
             )
 
             old_legend = a.get_legend()
@@ -1355,24 +1554,42 @@ class ShireInformer(CatInformer):
         return fig_list
 
 
-    def plot_sfh_templates(self):
+    def hist_redshifts_templates(self, hue='Dataset', **kwargs):
+        f, a = plt.subplots(1,1)
+        sns.histplot(data=self.templates_df, x='self.config.redshift_col', ax=a, hue=hue, **kwargs)
+        plt.show()
+        return f
+
+
+    def plot_sfh_templates(self, normalise=False, dataset=None):
         self._load_training()
 
         from .template import vmap_mean_sfr, T_ARR
-        srcs = np.unique(self.templates_df['Dataset'].values)
-        fcolors = plt.cm.rainbow(np.linspace(0, 1, len(srcs)))
+
+        srcs = np.unique(self.templates_df['Dataset'].values) if dataset is None else np.array([dataset])
         pars_arr = jnp.array(self.templates_df[_DUMMY_PARS.PARAM_NAMES_FLAT])
-        cdict = dict(zip(srcs, fcolors, strict=True))
+        
+        fcolors = mpl.colormaps['tab10'].colors
+        cdict = {_src: fcolors[isrc] for isrc, _src in enumerate(srcs)}
+        #fcolors = plt.cm.rainbow(np.linspace(0, 1, len(srcs)))
+        #cdict = dict(zip(srcs, fcolors, strict=True))
+
         all_sfh = vmap_mean_sfr(pars_arr)
         _min, _max = all_sfh.max()/1e6, all_sfh.max()*1.1
         f, a = plt.subplots(1,1)
         for sfh, src in zip(all_sfh, self.templates_df['Dataset'], strict=True):
-            a.plot(T_ARR, sfh, lw=1, ls='-', c=cdict[src])
-            a.set_xlabel('Age of the Universe [Gyr]')
-            a.set_ylabel('SFR '+r"$\mathrm{M_\odot.yr}^{-1}$")
-            a.set_title('SFH of photo-z templates')
-            a.set_ylim(_min, _max)
-            a.set_yscale('log')
+            if src in srcs:
+                if normalise:
+                    maxsfh = jnp.nanmax(sfh)
+                    a.plot(T_ARR, sfh/maxsfh, lw=1, ls='-', c=cdict[src])
+                    a.set_ylabel('SFR/SFR max [-]')
+                else:
+                    a.plot(T_ARR, sfh, lw=1, ls='-', c=cdict[src])
+                    a.set_ylabel('SFR '+r"$[\mathrm{M_\odot.yr}^{-1}]$")
+                a.set_xlabel('Age of the Universe [Gyr]')
+                a.set_title('SFH of photo-z templates')
+                a.set_ylim(_min, _max)
+                a.set_yscale('log')
 
         legs = []
         for src, colr in cdict.items():
@@ -1391,6 +1608,13 @@ class ShireInformer(CatInformer):
         #self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NUVK'] == _typ)//self.pzs.shape[0]  for _typ in _mod_names ])
         return all_tsels_df
 
+    def _nuvk_classif_nodustvar(self):
+        _mod_names = self.refcategs
+        self._load_training()
+        all_tsels_df = self._load_templates_nodustvar()
+        all_tsels_df['CAT_NUVK'] = np.array( _mod_names[ _n] for _n in self.prior_mod(jnp.array(all_tsels_df['NUVK'].values)) )
+        #self.nt_array = np.array([ np.count_nonzero(all_tsels_df['CAT_NUVK'] == _typ)//self.pzs.shape[0]  for _typ in _mod_names ])
+        return all_tsels_df
 
     def _bpt_classif(self):
         all_tsels_df = self._nuvk_classif()
@@ -1428,25 +1652,24 @@ class ShireInformer(CatInformer):
         for x, y in zip(all_tsels_df["log([NII]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
             if not (np.isfinite(x) and np.isfinite(y)):
                 cat_nii.append("NC")
-            elif y < Ka03_nii(x):
-                cat_nii.append("Star-forming")
-            elif y < Ke01_nii(x):
+            elif y >= Ke01_nii(x) or x >= 0.47:
+                cat_nii.append("AGN")
+            elif y >= Ka03_nii(x) or x >= 0.05:
                 cat_nii.append("Composite")
             else:
-                cat_nii.append("AGN")
-
+                cat_nii.append("Star-forming")
         all_tsels_df["CAT_NII"] = np.array(cat_nii)
 
         cat_sii = []
         for x, y in zip(all_tsels_df["log([SII]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
             if not (np.isfinite(x) and np.isfinite(y)):
                 cat_sii.append("NC")
-            elif y < Ke01_sii(x):
-                cat_sii.append("Star-forming")
-            elif y < Ke06_sii(x):
+            elif y >= Ke06_sii(x):
+                cat_sii.append("Seyferts")
+            elif y >= Ke01_sii(x) or x>=0.32:
                 cat_sii.append("LINER")
             else:
-                cat_sii.append("Seyferts")
+                cat_sii.append("Star-forming")
 
         all_tsels_df["CAT_SII"] = np.array(cat_sii)
 
@@ -1454,12 +1677,12 @@ class ShireInformer(CatInformer):
         for x, y in zip(all_tsels_df["log([OI]/[Ha])"], all_tsels_df["log([OIII]/[Hb])"], strict=False):
             if not (np.isfinite(x) and np.isfinite(y)):
                 cat_oi.append("NC")
-            elif y < Ke01_oi(x):
-                cat_oi.append("Star-forming")
-            elif y < Ke06_oi(x):
+            elif y >= Ke06_oi(x):
+                cat_oi.append("Seyferts")
+            elif y >= Ke01_oi(x) or x >= -0.59:
                 cat_oi.append("LINER")
             else:
-                cat_oi.append("Seyferts")
+                cat_oi.append("Star-forming")
 
         all_tsels_df["CAT_OI"] = np.array(cat_oi)
 
@@ -1467,12 +1690,12 @@ class ShireInformer(CatInformer):
         for x, y in zip(all_tsels_df["log([OI]/[Ha])"], all_tsels_df["log([OIII]/[OII])"], strict=False):
             if not (np.isfinite(x) and np.isfinite(y)):
                 cat_oii.append("NC")
-            elif y < lim_HII_comp(x):
-                cat_oii.append("SF / composite")
-            elif y < lim_seyf_liner(x):
+            elif y >= lim_seyf_liner(x):
+                cat_oii.append("Seyferts")
+            elif y >= lim_HII_comp(x):
                 cat_oii.append("LINER")
             else:
-                cat_oii.append("Seyferts")
+                cat_oii.append("SF / composite")
 
         all_tsels_df["CAT_OIII/OIIvsOI"] = np.array(cat_oii)
 
@@ -1502,24 +1725,31 @@ class ShireInformer(CatInformer):
                     ax=a
                 )
 
-                _x = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
                 if "NII" in cat:
-                    a.plot(_x, Ka03_nii(_x), 'k-', lw=1)
-                    a.plot(_x, Ke01_nii(_x), 'k-', lw=1)
+                    _xa = np.linspace(np.nanmin(all_tsels_df[x]), 0.05, 100, endpoint=False)
+                    a.plot(_xa, Ka03_nii(_xa), 'k-', lw=1)
+                    _xe = np.linspace(np.nanmin(all_tsels_df[x]), 0.47, 100, endpoint=False)
+                    a.plot(_xe, Ke01_nii(_xe), 'k:', lw=1)
                 elif "SII" in cat:
-                    a.plot(_x, Ke01_sii(_x), 'k-', lw=1)
-                    a.plot(_x, Ke06_sii(_x), 'k-', lw=1)
+                    _x1 = np.linspace(np.nanmin(all_tsels_df[x]), 0.32, 100, endpoint=False)
+                    a.plot(_x1, Ke01_sii(_x1), 'k-', lw=1)
+                    _x6 = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
+                    a.plot(_x6, Ke06_sii(_x6), 'k:', lw=1)
                 elif "OII" in cat:
+                    _x = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
                     a.plot(_x, lim_HII_comp(_x), 'k-', lw=1)
-                    a.plot(_x, lim_seyf_liner(_x), 'k-', lw=1)
+                    a.plot(_x, lim_seyf_liner(_x), 'k:', lw=1)
                 else:
-                    a.plot(_x, Ke01_oi(_x), 'k-', lw=1)
-                    a.plot(_x, Ke06_oi(_x), 'k-', lw=1)
+                    _x1 = np.linspace(np.nanmin(all_tsels_df[x]), -0.59, 100, endpoint=False)
+                    a.plot(_x1, Ke01_oi(_x1), 'k-', lw=1)
+                    _x6 = np.linspace(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]), 100, endpoint=True)
+                    a.plot(_x6, Ke06_oi(_x6), 'k:', lw=1)
                 a.set_xlim(np.nanmin(all_tsels_df[x]), np.nanmax(all_tsels_df[x]))
                 a.set_ylim(np.nanmin(all_tsels_df[y]), np.nanmax(all_tsels_df[y]))
                 fig_list.append(f)
                 plt.show()
         return fig_list
+
 
     def plot_templ_seds(self, redshifts=None, wlmin=None, wlmax=None, ymin=None, ymax=None):
         if redshifts is None:

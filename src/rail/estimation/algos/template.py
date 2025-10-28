@@ -556,6 +556,15 @@ def calc_d4000n_dusty(pars_arr, z_obs, ssp_data):
 v_d4000n_zo_dusty = vmap(calc_d4000n_dusty, in_axes=(None, 0, None))
 v_d4000n_dusty = vmap(v_d4000n_zo_dusty, in_axes=(0, None, None))
 
+def treemap_d4000_noav(pars_arr, z_obs, ssp_data):
+    templ_tupl = [tuple(_pars) for _pars in pars_arr]
+    reslist_of_tupl = tree_map(lambda partup: v_d4000n_zo_dusty(jnp.array(partup), z_obs, ssp_data), templ_tupl, is_leaf=istuple)
+    return reslist_of_tupl
+
+def treemap_d4000_noav_leg(pars_arr, zref, ssp_data):
+    templ_tupl = [tuple(_pars)+tuple([z]) for _pars, z in zip(pars_arr, zref, strict=True)]
+    reslist_of_tupl = tree_map(lambda partup: calc_d4000n_dusty(jnp.array(partup[:-1]), partup[-1], ssp_data), templ_tupl, is_leaf=istuple)
+    return reslist_of_tupl
 
 @jit
 def d4000n(pars_arr, z_obs, av, ssp_data):
@@ -678,6 +687,90 @@ def make_sps_itemplates(params_arr, wls, transm_arr, redz_arr, av_arr, ssp_data,
     # colors, nuvk = vmap_iclrs_pars(params_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data, id_imag)
     return reslist_of_tupl
 
+
+@jit
+def templ_mags_noav(params, wls, filt_trans_arr, z_obs, ssp_data):
+    """Return the photometric magnitudes for the given filters transmission
+    in X : predict the magnitudes in Filters
+    :param params: Model parameters
+    :type params: Dictionnary of parameters
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
+    :type z_obs: float
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+
+    :return: array the predicted magnitude for the SED spectrum model represented by its parameters.
+    :rtype: 1D JAX-array of floats of length (nb bands+2)
+    """
+    # get the restframe spectra without and with dust attenuation
+    ssp_wave, sed_restf, sed_attenuated = ssp_spectrum_fromparam(params, z_obs, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
+    _nuvk = jnp.array(
+        [
+            calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
+        ]
+    ) #NUV-K shall not include dust attenuation - Perhaps yes in fact?
+
+    mags_predictions = jnp.concatenate((_mags, _nuvk))
+
+    return mags_predictions
+
+
+vmap_mags_noav_zobs = vmap(templ_mags_noav, in_axes=(None, None, None, 0, None))
+vmap_mags_noav_pars = vmap(vmap_mags_noav_zobs, in_axes=(0, None, None, None, None))
+
+
+def templ_clrs_nuvk_noav(params, wls, filt_trans_arr, z_obs, ssp_data):
+    """Return the photometric color indices for the given filters transmission
+    :param params: Model parameters
+    :type params: Dictionnary of parameters
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
+    :type z_obs: float
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+
+    :return: tuple of arrays the predicted colors for the SED spectrum model represented by its parameters.
+    :rtype: tuple(array of floats of length (nb bands-1), float)
+    """
+    _mags = templ_mags_noav(params, wls, filt_trans_arr, z_obs, ssp_data)
+    return _mags[:-3] - _mags[1:-2], _mags[-2] - _mags[-1]
+
+
+vmap_clrs_noav_zobs = vmap(templ_clrs_nuvk_noav, in_axes=(None, None, None, 0, None))
+vmap_clrs_noav_pars = vmap(vmap_clrs_noav_zobs, in_axes=(0, None, None, None, None))
+
+def make_sps_templates_noav(params_arr, wls, transm_arr, redz_arr, ssp_data):
+    """make_sps_templates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
+
+    :param params_arr: Model parameters as output by DSPS
+    :type params_arr: Array of float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: JAX-array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param redz_arr: redshift grid on which to compute the templates photometry
+    :type redz_arr: array
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+    :return: Templates for photoZ estimation, accounting for the Star Formation History up to the redshift value, as estimated by DSPS
+    :rtype: Tuple of arrays of floats
+    """
+    # template_mags = vmap_mags_pars(params_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
+    # nuvk = template_mags[:, :, :, -2] - template_mags[:, :, :, -1]
+    # colors = template_mags[:, :, :, :-3] - template_mags[:, :, :, 1:-2]
+    templ_tupl = [tuple(_pars) for _pars in params_arr]
+    reslist_of_tupl = tree_map(lambda partup: vmap_clrs_noav_zobs(jnp.array(partup), wls, transm_arr, redz_arr, ssp_data), templ_tupl, is_leaf=istuple)
+    # colors, nuvk = vmap_clrs_pars(params_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
+    return reslist_of_tupl
 
 @jit
 def templ_mags_legacy(params, z_ref, wls, filt_trans_arr, z_obs, av, ssp_data):
@@ -807,6 +900,97 @@ def make_legacy_templates(params_arr, zref_arr, wls, transm_arr, redz_arr, av_ar
     # colors = template_mags[:, :, :, :-3] - template_mags[:, :, :, 1:-2]
     templ_tupl = [tuple(_pars) + tuple([z]) for _pars, z in zip(params_arr, zref_arr, strict=True)]
     reslist_of_tupl = tree_map(lambda partup: vmap_clrs_zobs_legacy(jnp.array(partup[:-1]), partup[-1], wls, transm_arr, redz_arr, av_arr, ssp_data), templ_tupl, is_leaf=istuple)
+    # colors, nuvk = vmap_clrs_pars_legacy(params_arr, zref_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
+    return reslist_of_tupl
+
+
+@jit
+def templ_mags_noav_legacy(params, z_ref, wls, filt_trans_arr, z_obs, ssp_data):
+    """Return the photometric magnitudes for the given filters transmission
+    :param params: Model parameters
+    :type params: Dictionnary of parameters
+    :param z_ref: redshift of the galaxy used as template
+    :type z_ref: float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
+    :type z_obs: float
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+
+    :return: array the predicted magnitude for the SED spectrum model represented by its parameters.
+    :rtype: 1D JAX-array of floats of length (nb bands+2)
+
+    """
+    # get the restframe spectra without and with dust attenuation
+    ssp_wave, sed_restf, sed_attenuated = ssp_spectrum_fromparam(params, z_ref, ssp_data)
+    _mags = vmap_calc_obs_mag(ssp_wave, sed_attenuated, wls, filt_trans_arr, z_obs)
+    _nuvk = jnp.array(
+        [
+            calc_rest_mag(ssp_wave, sed_attenuated, NUV_filt.wavelength, NUV_filt.transmission),
+            calc_rest_mag(ssp_wave, sed_attenuated, NIR_filt.wavelength, NIR_filt.transmission)
+        ]
+    ) # NUV-K shall not include dust attenuation -- Perhaps in fact yes
+
+    mags_predictions = jnp.concatenate((_mags, _nuvk))
+
+    return mags_predictions
+
+
+vmap_mags_noav_zobs_legacy = vmap(templ_mags_noav_legacy, in_axes=(None, None, None, None, 0, None))
+vmap_mags_noav_pars_legacy = vmap(vmap_mags_noav_zobs_legacy, in_axes=(0, 0, None, None, None, None))
+
+
+def templ_clrs_noav_nuvk_legacy(params, z_ref, wls, filt_trans_arr, z_obs, ssp_data):
+    """Return the photometric color indices for the given filters transmission
+    :param params: Model parameters
+    :type params: Dictionnary of parameters
+    :param z_ref: redshift of the galaxy used as template
+    :type z_ref: float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: Jax array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param z_obs: Redshift of the observations
+    :type z_obs: float
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+
+    :return: tuple of arrays the predicted colors for the SED spectrum model represented by its parameters.
+    :rtype: tuple(array of floats of length (nb bands-1), float)
+    """
+    _mags = templ_mags_noav_legacy(params, z_ref, wls, filt_trans_arr, z_obs, ssp_data)
+    return _mags[:-3] - _mags[1:-2], _mags[-2] - _mags[-1]
+
+
+vmap_clrs_noav_zobs_legacy = vmap(templ_clrs_noav_nuvk_legacy, in_axes=(None, None, None, None, 0, None))
+vmap_clrs_noav_pars_legacy = vmap(vmap_clrs_noav_zobs_legacy, in_axes=(0, 0, None, None, None, None))
+
+def make_legacy_templates_noav(params_arr, zref_arr, wls, transm_arr, redz_arr, ssp_data):
+    """make_legacy_templates Creates the set of templates for photo-z estimation, using DSPS to syntheticize the photometry from a set of input parameters.
+
+    :param params_arr: Model parameters as output by DSPS
+    :type params_arr: Array of float
+    :param z_ref: array of redshift of the galaxy used as template
+    :type z_ref: JAX-array of float
+    :param wls: Wavelengths on which the filters are interpolated
+    :type wls: JAX-array of float
+    :param filt_trans_arr: Filters transmission
+    :type filt_trans_arr: JAX-array of floats of dimension (nb bands+2) * len(wls). The last two bands are for the prior computation.
+    :param redz_arr: redshift grid on which to compute the templates photometry
+    :type redz_arr: array
+    :param ssp_data: SSP library
+    :type ssp_data: namedtuple
+    :return: Templates for photoZ estimation, accounting for the Star Formation History up to the redshift value, as estimated by DSPS
+    :rtype: Tuple of arrays of floats
+    """
+    # template_mags = vmap_mags_pars_legacy(params_arr, zref_arr, wls, transm_arr, redz_arr, av_arr, ssp_data)
+    # nuvk = template_mags[:, :, :, -2] - template_mags[:, :, :, -1]
+    # colors = template_mags[:, :, :, :-3] - template_mags[:, :, :, 1:-2]
+    templ_tupl = [tuple(_pars) + tuple([z]) for _pars, z in zip(params_arr, zref_arr, strict=True)]
+    reslist_of_tupl = tree_map(lambda partup: vmap_clrs_noav_zobs_legacy(jnp.array(partup[:-1]), partup[-1], wls, transm_arr, redz_arr, ssp_data), templ_tupl, is_leaf=istuple)
     # colors, nuvk = vmap_clrs_pars_legacy(params_arr, zref_arr, wls, transm_arr, redz_arr, anu_arr, ssp_data)
     return reslist_of_tupl
 
@@ -1054,14 +1238,29 @@ def bpt_rews_pars_zo(templ_pars, zobs, ssp_data):
 vmap_bpt_rews = vmap(bpt_rews_pars_zo, in_axes=(0, None, None))
 
 @jit
-def bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data):
+def bpt_rews_pars_dusty(templ_pars, zobs, ssp_data):
     _lines_wl = jnp.array([ 3728.48, 4862.68, 5008.24, 6302.046, 6564.61, 6585.27, 6718.29 ])
     _wls = jnp.arange(3500.0, 7000.0, 0.1)
-    templ_seds_zo = vmap_mean_spectrum_zo(_wls, templ_pars, zobs, ssp_data)
-    rews_zo = vmap_eqw_sed(_wls, templ_seds_zo, _lines_wl)
-    return rews_zo
+    templ_sed = mean_spectrum(_wls, templ_pars, zobs, ssp_data)
+    rews = vmap_calc_eqw(_wls, templ_sed, _lines_wl)
+    return rews
 
-vmap_bpt_rews_dusty = vmap(bpt_rews_pars_zo_dusty, in_axes=(0, None, None))
+    #templ_seds_zo = vmap_mean_spectrum_zo(_wls, templ_pars, zobs, ssp_data)
+    #rews_zo = vmap_eqw_sed(_wls, templ_seds_zo, _lines_wl)
+    #return rews_zo
+
+vmap_bpt_rews_dusty_zo = vmap(bpt_rews_pars_dusty, in_axes=(None, 0, None))
+vmap_bpt_rews_dusty = vmap(vmap_bpt_rews_dusty_zo, in_axes=(0, None, None))
+
+def treemap_bpt_noav(templ_pars, zobs, ssp_data):
+    templ_tupl = [tuple(_pars) for _pars in templ_pars]
+    reslist_of_tupl = tree_map(lambda partup: vmap_bpt_rews_dusty_zo(jnp.array(partup), zobs, ssp_data), templ_tupl, is_leaf=istuple)
+    return reslist_of_tupl
+
+def treemap_bpt_noav_leg(templ_pars, zref, ssp_data):
+    templ_tupl = [tuple(_pars)+tuple([z]) for _pars, z in zip(templ_pars, zref, strict=True)]
+    reslist_of_tupl = tree_map(lambda partup: bpt_rews_pars_dusty(jnp.array(partup[:-1]), partup[-1], ssp_data), templ_tupl, is_leaf=istuple)
+    return reslist_of_tupl
 
 @jit
 def bpt_rews(templ_pars, zobs, av, ssp_data):
@@ -1122,7 +1321,7 @@ vmap_colrs_bptrews_templ_zo = vmap(colrs_bptrews_templ_zo, in_axes=(0, None, Non
 
 @jit
 def colrs_bptrews_templ_zo_dusty(templ_pars, wls, zobs, transm_arr, ssp_data):
-    t_rews = bpt_rews_pars_zo_dusty(templ_pars, zobs, ssp_data)
+    t_rews = vmap_bpt_rews_dusty_zo(templ_pars, zobs, ssp_data)
     t_colors = vmap_cols_zo(templ_pars, wls, zobs, transm_arr, ssp_data)
     t_nuvk = v_nuvk_zo_dusty(templ_pars, zobs, ssp_data) #v_nuvk_zo(templ_pars, wls, zobs, ssp_data) -- NUV-K for prior shall perhaps include dust attenuation
     t_d4000n = v_d4000n_zo_dusty(templ_pars, zobs, ssp_data)
