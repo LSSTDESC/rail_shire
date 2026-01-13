@@ -36,7 +36,7 @@ dependencies = [
     "matplotlib",
     "seaborn",
     "qp_prob<1",
-    "tables_io<1"
+    "tables_io<2"
 ]
 
 # On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
